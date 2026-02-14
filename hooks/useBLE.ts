@@ -14,24 +14,24 @@ const requestAndroid31Permissions = async () => {
   const bluetoothScanPermission = await PermissionsAndroid.request(
     PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
     {
-      title: "Location Permission",
-      message: "Bluetooth Low Energy requires Location",
+      title: "Permiso de Bluetooth",
+      message: "La app necesita escanear dispositivos Bluetooth para conectar el medidor.",
       buttonPositive: "OK",
     },
   );
   const bluetoothConnectPermission = await PermissionsAndroid.request(
     PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
     {
-      title: "Location Permission",
-      message: "Bluetooth Low Energy requires Location",
+      title: "Permiso de Bluetooth",
+      message: "La app necesita conectarse al medidor por Bluetooth.",
       buttonPositive: "OK",
     },
   );
   const fineLocationPermission = await PermissionsAndroid.request(
     PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
     {
-      title: "Location Permission",
-      message: "Bluetooth Low Energy requires Location",
+      title: "Permiso de ubicación",
+      message: "Android requiere ubicación para el escaneo Bluetooth (no se usa tu posición).",
       buttonPositive: "OK",
     },
   );
@@ -70,9 +70,8 @@ export interface ConsoleEntry {
 }
 
 const bleManager = new BleManager();
-const TARGET_DEVICE_NAME = "HYDROGENMETER";
-const AUTO_CONNECT_TIMEOUT = 30000; // Aumentado a 30 segundos para dar tiempo al emparejamiento
-const SCAN_TIMEOUT = 15000;
+const AUTO_CONNECT_TIMEOUT = 30000;
+const SCAN_TIMEOUT = 15000; // Tiempo de escaneo para el modal de dispositivos
 
 export const useBLE = () => {
   // Usar Zustand store para persistir estados
@@ -98,6 +97,12 @@ export const useBLE = () => {
     addConsoleMessage,
     setGasPpm,
     setBateria,
+    setPreheatProgress,
+    setCalibratingProgress,
+    setDeviceReady,
+    preheatProgress,
+    calibratingProgress,
+    deviceReady,
     setShowDisconnectAlert,
     setIsConnecting,
     setConnectionSuccess,
@@ -105,6 +110,9 @@ export const useBLE = () => {
     setSavedDeviceId,
     setIgnoreDisconnection,
     clearConsole,
+    discoveredDevices,
+    clearDiscoveredDevices,
+    addDiscoveredDevice,
   } = useBLEStore();
 
   // Refs para sincronizar con el store y mantener compatibilidad
@@ -146,22 +154,49 @@ export const useBLE = () => {
     connectedDeviceRef.current = connectedDevice;
   }, [connectedDevice]);
 
-  // Parsear datos del sensor
+  /** Convierte tensión de batería en voltios a porcentaje: 3.2V = 0%, 3.8V = 100% (lineal). */
+  const voltageToBatteryPercent = (voltage: number): number => {
+    const MIN_V = 3.2;
+    const MAX_V = 3.8;
+    if (voltage <= MIN_V) return 0;
+    if (voltage >= MAX_V) return 100;
+    return Math.round(((voltage - MIN_V) / (MAX_V - MIN_V)) * 100);
+  };
+
+  // Parsear datos del sensor: PREHEAT X%, CALIBRATING X%; PPM y BAT cuando deviceReady
+  // Mensaje del dispositivo: "PPM: 0 | BAT: 0.0V"
   const parseSensorData = (data: string) => {
     try {
-      const gasPpmMatch = data.match(/GAS_PPM=(\d+)/i);
-      if (gasPpmMatch) {
-        const gasValue = parseInt(gasPpmMatch[1], 10);
-        if (!isNaN(gasValue)) {
-          setGasPpm(gasValue);
-        }
+      const preheatMatch = data.match(/PREHEAT\s*(\d+)\s*%/i);
+      if (preheatMatch) {
+        const value = parseInt(preheatMatch[1], 10);
+        if (!isNaN(value)) setPreheatProgress(value);
       }
 
-      const bateriaMatch = data.match(/BATERIA=(\d+)/i);
-      if (bateriaMatch) {
-        const bateriaValue = parseInt(bateriaMatch[1], 10);
-        if (!isNaN(bateriaValue)) {
-          setBateria(bateriaValue);
+      const calibratingMatch = data.match(/CALIBRATING\s*(\d+)\s*%/i);
+      if (calibratingMatch) {
+        setPreheatProgress(100); // Si está calibrando, preheat tiene que estar en 100
+        const value = parseInt(calibratingMatch[1], 10);
+        if (!isNaN(value)) setCalibratingProgress(value);
+      }
+
+      const state = useBLEStore.getState();
+      const ready = state.preheatProgress === 100 && state.calibratingProgress === 100;
+      if (ready) setDeviceReady(true);
+
+      // PPM y BAT se parsean siempre que vengan en el mensaje (mostrar en cuanto el equipo los envíe)
+      // Aceptar "PPM: 0", "PPM=0", "PPM 0" (espacios/símbolos flexibles)
+      const ppmMatch = data.match(/PPM[\s:=]+(\d+)/i);
+      if (ppmMatch) {
+        const ppmValue = parseInt(ppmMatch[1], 10);
+        if (!isNaN(ppmValue)) setGasPpm(ppmValue);
+      }
+
+      const batMatch = data.match(/BAT[\s:=]+([\d.]+)\s*V?/i);
+      if (batMatch) {
+        const voltage = parseFloat(batMatch[1]);
+        if (!isNaN(voltage)) {
+          setBateria(voltageToBatteryPercent(voltage));
         }
       }
     } catch (error) {
@@ -194,7 +229,21 @@ export const useBLE = () => {
   const startStreamingData = async (device: Device) => {
     if (!device) return;
 
+    setPreheatProgress(0);
+    setCalibratingProgress(0);
+    setDeviceReady(false);
+
     try {
+      // En Android, solicitar MTU ayuda a estabilizar la conexión y puede evitar
+      // que el sistema cierre el enlace BLE tras ~1 min de inactividad
+      if (Platform.OS === "android") {
+        try {
+          await device.requestMTU(256);
+        } catch (mtuError) {
+          console.log("requestMTU no disponible o falló (no crítico):", mtuError);
+        }
+      }
+
       const services = await device.services();
       const systemServicePatterns = ["1800", "1801"];
 
@@ -353,10 +402,10 @@ export const useBLE = () => {
       setIsLoading(true);
       addConsoleMessage("?? Estableciendo conexi?n...");
 
-      // Conectar al dispositivo (esto puede disparar el di?logo de emparejamiento)
-      const deviceConnection = await bleManager.connectToDevice(device.id, {
-        timeout: AUTO_CONNECT_TIMEOUT,
-      });
+      // Conectar al dispositivo (esto puede disparar el diálogo de emparejamiento).
+      // Opciones vacías {}: no usar timeout ni autoConnect. En Android provocaban
+      // desconexión ~45s después; al "reconectar" o aplicar el timeout se rompía la conexión.
+      const deviceConnection = await bleManager.connectToDevice(device.id, {});
 
       // NO marcar como conectado todav?a - esperar a que se complete el emparejamiento
       // El usuario a?n puede estar en el proceso de emparejamiento
@@ -641,17 +690,37 @@ export const useBLE = () => {
           const isConnected = await connectedDeviceRef.current.isConnected();
           if (isConnected) {
             console.log(
-              `? Dispositivo ya conectado en ref:`,
+              "Dispositivo ya conectado en ref:",
               connectedDeviceRef.current.id,
             );
-            setConnectedDevice(connectedDeviceRef.current);
-            setHc06Device(connectedDeviceRef.current);
+            const device = connectedDeviceRef.current;
+            setConnectedDevice(device);
+            setHc06Device(device);
+            setSavedDeviceId(device.id);
             setIsLoading(false);
             setAutoConnectFailed(false);
+            // Importante: iniciar streaming para recibir datos (antes no se hacía y no llegaban datos)
+            if (!disconnectSubscriptionRef.current) {
+              disconnectSubscriptionRef.current = device.onDisconnected(
+                (err) => {
+                  if (err) handleDisconnection();
+                  else {
+                    setTimeout(async () => {
+                      try {
+                        if (!(await device.isConnected())) handleDisconnection();
+                      } catch {
+                        handleDisconnection();
+                      }
+                    }, 2000);
+                  }
+                },
+              );
+            }
+            startStreamingData(device);
             return true;
           }
         } catch (error) {
-          console.log("Dispositivo en ref no est? conectado:", error);
+          console.log("Dispositivo en ref no está conectado:", error);
         }
       }
 
@@ -660,10 +729,6 @@ export const useBLE = () => {
         try {
           const isConnected = await hc06Device.isConnected();
           if (isConnected) {
-            console.log(
-              `? Dispositivo ${TARGET_DEVICE_NAME} ya est? conectado:`,
-              hc06Device.id,
-            );
             connectedDeviceRef.current = hc06Device;
             await connectToDevice(hc06Device);
             return true;
@@ -676,15 +741,14 @@ export const useBLE = () => {
       // Si tenemos un ID guardado de una conexi?n previa, intentar verificar
       if (savedDeviceIdRef.current) {
         try {
-          // Intentar obtener el dispositivo por ID usando connectedDevices
           const connectedDevices = await bleManager.connectedDevices([
             savedDeviceIdRef.current,
           ]);
           if (connectedDevices && connectedDevices.length > 0) {
             const device = connectedDevices[0];
-            if (device && device.name === TARGET_DEVICE_NAME) {
+            if (device) {
               console.log(
-                `? Dispositivo ${TARGET_DEVICE_NAME} encontrado conectado por ID:`,
+                "Dispositivo encontrado conectado por ID:",
                 device.id,
               );
               connectedDeviceRef.current = device;
@@ -701,21 +765,19 @@ export const useBLE = () => {
         }
       }
 
-      // Verificar todos los dispositivos conectados por nombre (?ltimo recurso)
+      // Verificar todos los dispositivos BLE ya conectados (último recurso)
       try {
         const allConnectedDevices = await bleManager.connectedDevices([]);
-        const hc06Connected = allConnectedDevices.find(
-          (device) => device.name === TARGET_DEVICE_NAME,
-        );
-        if (hc06Connected) {
+        if (allConnectedDevices.length > 0) {
+          const device = allConnectedDevices[0];
           console.log(
-            `? Dispositivo ${TARGET_DEVICE_NAME} encontrado en dispositivos conectados:`,
-            hc06Connected.id,
+            "Dispositivo BLE encontrado ya conectado:",
+            device.id,
           );
-          connectedDeviceRef.current = hc06Connected;
-          setSavedDeviceId(hc06Connected.id);
-          setHc06Device(hc06Connected);
-          await connectToDevice(hc06Connected);
+          connectedDeviceRef.current = device;
+          setSavedDeviceId(device.id);
+          setHc06Device(device);
+          await connectToDevice(device);
           return true;
         }
       } catch (error) {
@@ -735,135 +797,87 @@ export const useBLE = () => {
 
   // addConsoleMessage ya viene del store de Zustand
 
-  // Escanear dispositivos
-  const scanForPeripherals = async () => {
-    // Cuando se llama desde startAutoScan, los estados ya fueron reseteados
-    // Solo verificar si hay una conexi?n activa antes de escanear
-    if (connectedDeviceRef.current) {
-      try {
-        const isConnected = await connectedDeviceRef.current.isConnected();
-        if (isConnected) {
-          console.log(
-            "Dispositivo ya est? conectado, no es necesario escanear",
-          );
-          addConsoleMessage("? Dispositivo ya est? conectado");
-          setIsLoading(false);
-          setAutoConnectFailed(false);
-          return;
-        }
-      } catch (error) {
-        console.log("Error verificando conexi?n existente:", error);
-        // Si hay error, continuar con el escaneo
-      }
-    }
-
-    // Asegurarse de que no hay escaneo en curso antes de iniciar uno nuevo
-    if (isScanningRef.current) {
-      console.log("Ya hay un escaneo en curso, deteniendo...");
-      bleManager.stopDeviceScan();
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-
-    // Iniciar escaneo limpio
-    console.log("Iniciando escaneo de dispositivos...");
-    setIsScanning(true);
-    addConsoleMessage("?? Buscando dispositivos...");
-
-    bleManager.startDeviceScan(null, null, (error, device) => {
-      if (error) {
-        console.error("Error en escaneo:", error);
-        addConsoleMessage(`[ERROR] Error al escanear: ${error.message}`);
-        setIsScanning(false);
-        return;
-      }
-
-      if (device && device.name === TARGET_DEVICE_NAME) {
-        console.log(
-          `? Dispositivo ${TARGET_DEVICE_NAME} encontrado:`,
-          device.id,
-        );
-        addConsoleMessage(
-          `? Dispositivo encontrado: ${TARGET_DEVICE_NAME} (${device.id})`,
-        );
-
-        // Detener el escaneo inmediatamente cuando se encuentra
-        bleManager.stopDeviceScan();
-        setIsScanning(false);
-
-        // Establecer el dispositivo encontrado
-        setHc06Device(device);
-      }
-    });
-  };
-
-  // Iniciar escaneo autom?tico
-  const startAutoScan = async () => {
-    // Primero verificar si ya est? conectado ANTES de resetear estados
-    const alreadyConnected = await checkAlreadyConnected();
-    if (alreadyConnected) {
-      console.log("Dispositivo ya estaba conectado, no es necesario escanear");
-      setIsLoading(false);
-      setAutoConnectFailed(false);
-      return;
-    }
-
-    // Resetear TODOS los estados al inicio de una b?squeda nueva
-    console.log("Iniciando b?squeda nueva - restaurando estados al inicio...");
-
-    // Detener cualquier escaneo en curso
-    bleManager.stopDeviceScan();
-    setIsScanning(false);
-
-    // Limpiar timeouts
-    if (connectionTimeoutRef.current) {
-      clearTimeout(connectionTimeoutRef.current);
-      connectionTimeoutRef.current = null;
-    }
+  // Detener escaneo BLE (para cerrar modal o al seleccionar dispositivo)
+  const stopScan = () => {
     if (scanTimeoutRef.current) {
       clearTimeout(scanTimeoutRef.current);
       scanTimeoutRef.current = null;
     }
+    bleManager.stopDeviceScan();
+    setIsScanning(false);
+  };
 
-    // Resetear todos los estados
-    setIsLoading(true);
-    setAutoConnectFailed(false);
-    setHc06Device(null);
-    connectedDeviceRef.current = null;
-    setConnectedDevice(null);
-    setConsoleData([]);
-    setGasPpm(null);
-    setBateria(null);
-    setIsConnecting(false);
-    setConnectionSuccess(false);
+  // Escaneo para descubrir dispositivos y mostrarlos en el modal (sin auto-conectar)
+  const startDiscoveryScan = async () => {
+    if (connectedDeviceRef.current) {
+      try {
+        const isConnected = await connectedDeviceRef.current.isConnected();
+        if (isConnected) {
+          addConsoleMessage("✓ Dispositivo ya está conectado");
+          return;
+        }
+      } catch {
+        // Continuar con el escaneo
+      }
+    }
 
-    // Esperar un momento para que los estados se actualicen
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const hasPermission = await requestPermissions();
+    if (!hasPermission) {
+      addConsoleMessage(
+        "[ERROR] Sin permisos de Bluetooth. Activa Bluetooth y los permisos de la app en Ajustes.",
+      );
+      return;
+    }
 
-    // Iniciar escaneo limpio
-    console.log("Dispositivo no encontrado conectado, iniciando escaneo...");
-    addConsoleMessage("?? Iniciando b?squeda de dispositivos...");
-    await scanForPeripherals();
+    if (isScanningRef.current) {
+      bleManager.stopDeviceScan();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    clearDiscoveredDevices();
+    setIsScanning(true);
+    addConsoleMessage("🔍 Buscando dispositivos...");
+
+    bleManager.startDeviceScan(null, null, (error, device) => {
+      if (error) {
+        console.error("Error en escaneo:", error);
+        const isNotAuthorized =
+          error.message?.includes("not authorized") ||
+          error.message?.includes("Device is not authorized");
+        if (isNotAuthorized) {
+          addConsoleMessage(
+            "[ERROR] Bluetooth no autorizado. Ve a Ajustes > Apps > Hydrogen y activa los permisos de Bluetooth.",
+          );
+        } else {
+          addConsoleMessage(`[ERROR] ${error.message}`);
+        }
+        setIsScanning(false);
+        return;
+      }
+      if (device) {
+        addDiscoveredDevice(device);
+      }
+    });
 
     scanTimeoutRef.current = setTimeout(() => {
-      const currentDevice = useBLEStore.getState().hc06Device;
-      const currentConnected = useBLEStore.getState().connectedDevice;
-      const currentScanning = useBLEStore.getState().isScanning;
-
-      if (!currentDevice && !currentConnected && currentScanning) {
-        setIsLoading(false);
-        setAutoConnectFailed(true);
-        bleManager.stopDeviceScan();
-        setIsScanning(false);
-        addConsoleMessage(
-          "?? No se encontraron dispositivos. Tiempo de b?squeda agotado.",
-        );
+      bleManager.stopDeviceScan();
+      setIsScanning(false);
+      if (scanTimeoutRef.current) {
+        clearTimeout(scanTimeoutRef.current);
+        scanTimeoutRef.current = null;
       }
+      const count = useBLEStore.getState().discoveredDevices.length;
+      addConsoleMessage(
+        count > 0
+          ? `✓ Escaneo finalizado. ${count} dispositivo(s) encontrado(s).`
+          : "⚠ No se encontraron dispositivos. Intenta acercar el dispositivo.",
+      );
     }, SCAN_TIMEOUT);
   };
 
-  // Conectar manualmente - reinicia la b?squeda completa
+  // Conectar manualmente: inicia el escaneo para mostrar dispositivos en el modal
   const connectManually = () => {
-    startAutoScan();
+    startDiscoveryScan();
   };
 
   // clearConsole ya viene del store de Zustand, pero necesitamos limpiar tambi?n gasPpm y bateria
@@ -871,6 +885,9 @@ export const useBLE = () => {
     clearConsole();
     setGasPpm(null);
     setBateria(null);
+    setPreheatProgress(0);
+    setCalibratingProgress(0);
+    setDeviceReady(false);
   };
 
   // Manejar desconexi�n
@@ -904,30 +921,33 @@ export const useBLE = () => {
     // Limpiar hc06Device para evitar reconexi�n autom�tica inmediata
     setHc06Device(null);
 
-    // Limpiar datos del sensor cuando se desconecta
+    // Limpiar datos del sensor y estado de calentamiento cuando se desconecta
     setGasPpm(null);
     setBateria(null);
+    setPreheatProgress(0);
+    setCalibratingProgress(0);
+    setDeviceReady(false);
 
     // NO limpiar savedDeviceIdRef para poder verificar en el futuro
     // savedDeviceIdRef.current se mantiene para la pr�xima verificaci�n
 
-    // Limpiar timeouts
     if (connectionTimeoutRef.current) {
       clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
     }
 
-    // Detener cualquier escaneo en curso
     bleManager.stopDeviceScan();
     setIsScanning(false);
-
-    console.log("Dispositivo desconectado - estados reseteados");
   };
 
-  // Efecto: escaneo autom?tico al montar
+  // Efecto: al montar, pedir permisos y comprobar si ya hay un dispositivo conectado
   useEffect(() => {
-    requestPermissions().then(() => {
-      startAutoScan();
+    requestPermissions().then(async () => {
+      const alreadyConnected = await checkAlreadyConnected();
+      if (!alreadyConnected) {
+        setIsLoading(false);
+        setAutoConnectFailed(true);
+      }
     });
 
     return () => {
@@ -946,33 +966,26 @@ export const useBLE = () => {
     };
   }, []);
 
-  // Efecto: conectar autom?ticamente cuando se encuentra el dispositivo
-  useEffect(() => {
-    // No intentar conectar si ya hay una conexi?n en progreso o si se est? procesando algo
-    if (
-      hc06Device &&
-      !connectedDevice &&
-      !autoConnectFailed &&
-      !isConnectingState
-    ) {
-      attemptAutoConnect(hc06Device);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hc06Device, connectedDevice, autoConnectFailed]);
-
   return {
     connectedDevice,
     hc06Device,
     isLoading,
+    isScanning: isScanningState,
     autoConnectFailed,
     consoleData,
     gasPpm,
     bateria,
+    preheatProgress,
+    calibratingProgress,
+    deviceReady,
     showDisconnectAlert,
     setShowDisconnectAlert,
     connectManually,
     clearConsole: clearConsoleWithReset,
-    startAutoScan,
+    startDiscoveryScan,
+    stopScan,
+    discoveredDevices,
+    connectToDevice,
     ignoreDisconnectionRef: {
       current: ignoreDisconnectionState,
       set: setIgnoreDisconnection,

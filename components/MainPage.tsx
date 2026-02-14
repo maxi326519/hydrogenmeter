@@ -54,14 +54,29 @@ export default function MainPage() {
     consoleData,
     gasPpm,
     bateria,
+    preheatProgress,
+    calibratingProgress,
+    deviceReady,
     showDisconnectAlert,
     setShowDisconnectAlert,
     connectManually,
     clearConsole,
     ignoreDisconnectionRef,
+    startDiscoveryScan,
+    stopScan,
+    discoveredDevices,
+    connectToDevice,
+    isScanning,
   } = useBLE();
 
+  // Barra unificada: 0–50% = PREHEAT, 50–100% = CALIBRATING
+  const warmupProgressPercent =
+    (preheatProgress / 100) * 50 + (calibratingProgress / 100) * 50;
+  const warmupPhaseLabel =
+    warmupProgressPercent < 50 ? "Precalentando..." : "Calibrando...";
+
   const [showLogModal, setShowLogModal] = useState(false);
+  const [showConnectModal, setShowConnectModal] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [alarmEnabled, setAlarmEnabled] = useState(false);
   const [ppmDirection, setPpmDirection] = useState<"up" | "down" | null>(null);
@@ -480,7 +495,7 @@ export default function MainPage() {
         />
       )}
 
-      {/* Batería arriba a la derecha - siempre visible */}
+      {/* Batería arriba a la derecha - nivel real cuando hay dato (equipo enviando) */}
       <View style={styles.batteryContainer}>
         {bateria !== null ? (
           getBatteryIcon()
@@ -510,7 +525,8 @@ export default function MainPage() {
           }
           onPress={() => {
             if (!connectedDevice) {
-              connectManually();
+              setShowConnectModal(true);
+              startDiscoveryScan();
             }
             console.log(
               "WiFi presionado - Estado:",
@@ -628,50 +644,69 @@ export default function MainPage() {
             <View style={styles.centerContent}>
               <TouchableOpacity
                 style={styles.connectButton}
-                onPress={connectManually}
+                onPress={() => {
+                  setShowConnectModal(true);
+                  startDiscoveryScan();
+                }}
               >
                 <Text style={styles.connectButtonText}>Conectar</Text>
               </TouchableOpacity>
             </View>
           ) : null}
         </>
-      ) : (
-        // Estado: Conectado - mostrar PPM normalmente
+      ) : connectedDevice && (gasPpm !== null || gasPpm === 0) ? (
+        // Conectado y ya hay dato de PPM (incl. 0): mostrar PPM y barra
         <View style={styles.centerContent}>
-          {/* Cuando no hay cámara, mostrar normalmente con barra de rango */}
-          <>
-            {/* Barra de rango 0-10,000 */}
-            <View style={styles.rangeBarContainer}>
-              <View style={styles.rangeBar}>
-                <View
-                  style={[
-                    styles.rangeBarFill,
-                    {
-                      width: `${Math.min(
-                        ((gasPpm !== null ? gasPpm : 0) / 10000) * 100,
-                        100,
-                      )}%`,
-                    },
-                  ]}
-                />
+          <View style={styles.rangeBarContainer}>
+            <View style={styles.rangeBar}>
+              <View
+                style={[
+                  styles.rangeBarFill,
+                  {
+                    width: `${Math.min(
+                      ((gasPpm !== null ? gasPpm : 0) / 10000) * 100,
+                      100,
+                    )}%`,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+          <View style={styles.ppmContainer}>
+            <Text style={styles.ppmValue}>
+              {gasPpm !== null ? gasPpm : "--"}
+            </Text>
+            {gasPpm !== null && ppmDirection === "up" && (
+              <View style={styles.ppmArrow}>
+                <ArrowUpIcon size={40} color={AppRed} />
               </View>
+            )}
+            {gasPpm !== null && ppmDirection === "down" && (
+              <View style={styles.ppmArrow}>
+                <ArrowDownIcon size={40} color={AppRed} />
+              </View>
+            )}
+          </View>
+        </View>
+      ) : (
+        // Conectado pero sin dato PPM aún: precalentamiento/calibración
+        <View style={styles.centerContent}>
+          <View style={styles.warmupBarContainer}>
+            <View style={styles.warmupBar}>
+              <View
+                style={[
+                  styles.warmupBarFill,
+                  { width: `${Math.min(warmupProgressPercent, 100)}%` },
+                ]}
+              />
             </View>
-            <View style={styles.ppmContainer}>
-              <Text style={styles.ppmValue}>
-                {gasPpm !== null ? gasPpm : "--"}
-              </Text>
-              {gasPpm !== null && ppmDirection === "up" && (
-                <View style={styles.ppmArrow}>
-                  <ArrowUpIcon size={40} color={AppRed} />
-                </View>
-              )}
-              {gasPpm !== null && ppmDirection === "down" && (
-                <View style={styles.ppmArrow}>
-                  <ArrowDownIcon size={40} color={AppRed} />
-                </View>
-              )}
-            </View>
-          </>
+            <Text style={styles.warmupLabel}>{warmupPhaseLabel}</Text>
+            <Text style={styles.warmupSubtext}>
+              {warmupProgressPercent < 50
+                ? `Precalentando ${preheatProgress}%`
+                : `Calibrando ${calibratingProgress}%`}
+            </Text>
+          </View>
         </View>
       )}
 
@@ -802,6 +837,90 @@ export default function MainPage() {
                 {consoleData.length} mensaje
                 {consoleData.length !== 1 ? "s" : ""} recibido
                 {consoleData.length !== 1 ? "s" : ""}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de selección de dispositivos BLE */}
+      <Modal
+        visible={showConnectModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          stopScan();
+          setShowConnectModal(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Seleccionar dispositivo</Text>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  stopScan();
+                  setShowConnectModal(false);
+                }}
+              >
+                <Text style={styles.modalButtonText}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
+            {isScanning && discoveredDevices.length === 0 ? (
+              <View style={styles.modalBody}>
+                <ActivityIndicator size="large" color={AppRed} />
+                <Text style={[styles.modalText, { marginTop: 16 }]}>
+                  Buscando dispositivos...
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.modalScrollViewContainer}>
+              <ScrollView
+                style={styles.modalScrollView}
+                contentContainerStyle={
+                  discoveredDevices.length === 0 && !isScanning
+                    ? styles.modalScrollViewContentEmpty
+                    : undefined
+                }
+                showsVerticalScrollIndicator={true}
+              >
+                {discoveredDevices.length === 0 && !isScanning ? (
+                  <Text style={styles.modalEmptyText}>
+                    No se encontraron dispositivos. Asegúrate de que el
+                    Bluetooth esté encendido y el dispositivo cerca.
+                  </Text>
+                ) : (
+                  discoveredDevices.map((device) => (
+                    <TouchableOpacity
+                      key={device.id}
+                      style={styles.deviceItem}
+                      onPress={() => {
+                        stopScan();
+                        setShowConnectModal(false);
+                        connectToDevice(device);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.deviceItemName} numberOfLines={1}>
+                        {device.name ||
+                          device.localName ||
+                          "Dispositivo sin nombre"}
+                      </Text>
+                      <Text style={styles.deviceItemId} numberOfLines={1}>
+                        {device.id}
+                      </Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </ScrollView>
+            </View>
+            <View style={styles.modalFooter}>
+              <Text style={styles.modalFooterText}>
+                {discoveredDevices.length} dispositivo
+                {discoveredDevices.length !== 1 ? "s" : ""} encontrado
+                {discoveredDevices.length !== 1 ? "s" : ""}
+                {isScanning ? " · Buscando..." : ""}
               </Text>
             </View>
           </View>
@@ -1270,6 +1389,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#2d2d2d",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+    height: "80%",
     maxHeight: "80%",
     paddingBottom: 20,
   },
@@ -1300,9 +1420,17 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
   },
+  modalScrollViewContainer: {
+    flex: 1,
+    minHeight: 200,
+    backgroundColor: "#2d2d2d",
+  },
   modalScrollView: {
     flex: 1,
     backgroundColor: "#2d2d2d",
+  },
+  modalScrollViewContentEmpty: {
+    flexGrow: 1,
   },
   modalEmptyText: {
     color: "#888",
@@ -1316,6 +1444,22 @@ const styles = StyleSheet.create({
     padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#444",
+  },
+  deviceItem: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#444",
+  },
+  deviceItemName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#fff",
+    marginBottom: 4,
+  },
+  deviceItemId: {
+    fontSize: 12,
+    color: "#888",
+    fontFamily: "monospace",
   },
   logTimestamp: {
     color: "#888",
@@ -1733,6 +1877,34 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: AppRed,
     borderRadius: 8,
+  },
+  warmupBarContainer: {
+    width: "80%",
+    maxWidth: 400,
+    alignItems: "center",
+  },
+  warmupBar: {
+    width: "100%",
+    height: 20,
+    backgroundColor: "#444",
+    borderRadius: 10,
+    overflow: "hidden",
+    marginBottom: 16,
+  },
+  warmupBarFill: {
+    height: "100%",
+    backgroundColor: AppRed,
+    borderRadius: 10,
+  },
+  warmupLabel: {
+    fontSize: 20,
+    fontWeight: "600",
+    color: "#fff",
+    marginBottom: 8,
+  },
+  warmupSubtext: {
+    fontSize: 14,
+    color: "#888",
   },
   photoOverlayContainer: {
     position: "absolute",

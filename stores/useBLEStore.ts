@@ -12,7 +12,15 @@ interface BLEState {
   gasPpm: number | null;
   bateria: number | null;
   showDisconnectAlert: boolean;
-  
+  /** Progreso de precalentamiento 0-100 (equipo envía "PREHEAT X%") */
+  preheatProgress: number;
+  /** Progreso de calibración 0-100 (equipo envía "CALIBRATING X%") */
+  calibratingProgress: number;
+  /** true cuando preheat y calibrating llegaron a 100%; entonces se muestran PPM y batería */
+  deviceReady: boolean;
+  /** Lista de dispositivos descubiertos al escanear (para el modal de selección) */
+  discoveredDevices: Device[];
+
   // Estados internos (para refs)
   isConnecting: boolean;
   connectionSuccess: boolean;
@@ -29,6 +37,9 @@ interface BLEState {
   addConsoleMessage: (message: string) => void;
   setGasPpm: (ppm: number | null) => void;
   setBateria: (bateria: number | null) => void;
+  setPreheatProgress: (value: number) => void;
+  setCalibratingProgress: (value: number) => void;
+  setDeviceReady: (ready: boolean) => void;
   setShowDisconnectAlert: (show: boolean) => void;
   setIsConnecting: (connecting: boolean) => void;
   setConnectionSuccess: (success: boolean) => void;
@@ -36,6 +47,9 @@ interface BLEState {
   setSavedDeviceId: (id: string | null) => void;
   setIgnoreDisconnection: (ignore: boolean) => void;
   clearConsole: () => void;
+  setDiscoveredDevices: (devices: Device[]) => void;
+  addDiscoveredDevice: (device: Device) => void;
+  clearDiscoveredDevices: () => void;
 }
 
 export const useBLEStore = create<BLEState>((set) => ({
@@ -48,6 +62,10 @@ export const useBLEStore = create<BLEState>((set) => ({
   gasPpm: null,
   bateria: null,
   showDisconnectAlert: false,
+  preheatProgress: 0,
+  calibratingProgress: 0,
+  deviceReady: false,
+  discoveredDevices: [],
   isConnecting: false,
   connectionSuccess: false,
   isScanning: false,
@@ -73,6 +91,11 @@ export const useBLEStore = create<BLEState>((set) => ({
     })),
   setGasPpm: (ppm) => set({ gasPpm: ppm }),
   setBateria: (bateria) => set({ bateria }),
+  setPreheatProgress: (value) =>
+    set({ preheatProgress: Math.min(100, Math.max(0, value)) }),
+  setCalibratingProgress: (value) =>
+    set({ calibratingProgress: Math.min(100, Math.max(0, value)) }),
+  setDeviceReady: (ready) => set({ deviceReady: ready }),
   setShowDisconnectAlert: (show) => set({ showDisconnectAlert: show }),
   setIsConnecting: (connecting) => set({ isConnecting: connecting }),
   setConnectionSuccess: (success) => set({ connectionSuccess: success }),
@@ -80,4 +103,14 @@ export const useBLEStore = create<BLEState>((set) => ({
   setSavedDeviceId: (id) => set({ savedDeviceId: id }),
   setIgnoreDisconnection: (ignore) => set({ ignoreDisconnection: ignore }),
   clearConsole: () => set({ consoleData: [] }),
+  setDiscoveredDevices: (devices) => set({ discoveredDevices: devices }),
+  addDiscoveredDevice: (device) =>
+    set((state) => {
+      const exists = state.discoveredDevices.some((d) => d.id === device.id);
+      if (exists) return state;
+      return {
+        discoveredDevices: [...state.discoveredDevices, device],
+      };
+    }),
+  clearDiscoveredDevices: () => set({ discoveredDevices: [] }),
 }));
