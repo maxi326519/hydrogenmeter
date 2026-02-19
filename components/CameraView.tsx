@@ -20,6 +20,8 @@ export const CameraView: React.FC<CameraViewProps> = ({ visible, onClose, camera
         ref={cameraRef}
         style={styles.camera}
         facing="back"
+        flash="off"
+        animateShutter={false}
       />
     </View>
   );

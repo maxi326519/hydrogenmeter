@@ -13,3 +13,4 @@ export { Battery100Icon } from './Battery100Icon';
 export { SettingsIcon } from './SettingsIcon';
 export { ArrowUpIcon } from './ArrowUpIcon';
 export { ArrowDownIcon } from './ArrowDownIcon';
+export { ArrowBackIcon } from './ArrowBackIcon';

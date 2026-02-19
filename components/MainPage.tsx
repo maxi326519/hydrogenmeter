@@ -42,6 +42,7 @@ import {
   SettingsIcon,
   ArrowUpIcon,
   ArrowDownIcon,
+  ArrowBackIcon,
 } from "./Icons";
 
 import TextInput from "./Inputs/TextInput";
@@ -71,11 +72,9 @@ export default function MainPage() {
     isScanning,
   } = useBLEOrMock();
 
-  // Barra unificada: 0–50% = PREHEAT, 50–100% = CALIBRATING
+  // Barra unificada: 0–50% = preheat, 50–100% = calibración (siempre "Calibrando")
   const warmupProgressPercent =
     (preheatProgress / 100) * 50 + (calibratingProgress / 100) * 50;
-  const warmupPhaseLabel =
-    warmupProgressPercent < 50 ? "Precalentando..." : "Calibrando...";
 
   const [showLogModal, setShowLogModal] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
@@ -469,9 +468,9 @@ export default function MainPage() {
               }
             }}
           />
-          {/* "HYDROGEN METER" arriba a la izquierda */}
+          {/* "Hydrogen Meter" arriba a la izquierda */}
           <View style={styles.overlayTopLeft}>
-            <Text style={styles.overlayTextTop}>HYDROGEN METER</Text>
+            <Text style={styles.overlayTextTop}>Hydrogen Meter</Text>
           </View>
           {/* Número del sensor abajo centrado (3er cuadrante) - usa la medición almacenada al tomar la foto */}
           <View style={styles.overlayBottomCenter}>
@@ -514,80 +513,100 @@ export default function MainPage() {
         )}
       </View>
 
-      {/* Botón de log abajo a la izquierda - siempre visible */}
-      <View style={styles.logButtonContainer}>
-        <IconButton
-          icon={<SettingsIcon size={28} color={AppRed} />}
-          onPress={() => setShowLogModal(true)}
-        />
-      </View>
+      {/* Botones: modo cámara (solo volver + sonido) o modo normal (todos) */}
+      {showCamera && cameraPermission?.granted ? (
+        <>
+          {/* Botón volver - izquierda */}
+          <View style={styles.cameraBackButtonContainer}>
+            <IconButton
+              icon={<ArrowBackIcon size={28} color={AppRed} />}
+              onPress={() => setShowCamera(false)}
+            />
+          </View>
+          {/* Botón sonido - derecha */}
+          <View style={styles.cameraSoundButtonContainer}>
+            <IconButton
+              icon={
+                alarmEnabled ? (
+                  <SoundMaxIcon size={28} color={AppRed} />
+                ) : (
+                  <SoundMuteIcon size={28} color={AppRed} />
+                )
+              }
+              onPress={() => {
+                setAlarmEnabled(!alarmEnabled);
+                console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
+              }}
+            />
+          </View>
+        </>
+      ) : (
+        <>
+          {/* Botón de log abajo a la izquierda */}
+          <View style={styles.logButtonContainer}>
+            <IconButton
+              icon={<SettingsIcon size={28} color={AppRed} />}
+              onPress={() => setShowLogModal(true)}
+            />
+          </View>
 
-      {/* Botones de iconos abajo a la derecha - siempre visible */}
-      <View style={styles.iconButtonsContainer}>
-        {/* WiFi - Cambia según el estado de conexión */}
-        <IconButton
-          icon={
-            connectedDevice ? (
-              <WifiOnIcon size={28} color={AppRed} />
-            ) : (
-              <WifiOffIcon size={28} color={AppRed} />
-            )
-          }
-          onPress={() => {
-            if (!connectedDevice) {
-              setShowConnectModal(true);
-              startDiscoveryScan();
-            }
-            console.log(
-              "WiFi presionado - Estado:",
-              connectedDevice ? "Conectado" : "Desconectado",
-            );
-          }}
-        />
-
-        {/* Cámara */}
-        <IconButton
-          icon={<CameraIcon size={28} color={AppRed} />}
-          onPress={handleCameraPress}
-          disabled={!connectedDevice}
-        />
-
-        {/* Video */}
-        <IconButton
-          icon={<VideoIcon size={28} color={AppRed} />}
-          onPress={() => {
-            // Acción para video
-            console.log("Video presionado");
-          }}
-          disabled={!connectedDevice}
-        />
-
-        {/* Galería (Folder) */}
-        <IconButton
-          icon={<FolderIcon size={28} color={AppRed} />}
-          onPress={() => {
-            loadRecords();
-            setShowGalleryModal(true);
-          }}
-        />
-
-        {/* Alarma - Toggle on/off */}
-        <IconButton
-          icon={
-            alarmEnabled ? (
-              <SoundMaxIcon size={28} color={AppRed} />
-            ) : (
-              <SoundMuteIcon size={28} color={AppRed} />
-            )
-          }
-          onPress={() => {
-            setAlarmEnabled(!alarmEnabled);
-            console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
-            // Aquí se implementará la función de alarma cuando esté lista
-          }}
-          disabled={!connectedDevice}
-        />
-      </View>
+          {/* Botones de iconos abajo a la derecha */}
+          <View style={styles.iconButtonsContainer}>
+            <IconButton
+              icon={
+                connectedDevice ? (
+                  <WifiOnIcon size={28} color={AppRed} />
+                ) : (
+                  <WifiOffIcon size={28} color={AppRed} />
+                )
+              }
+              onPress={() => {
+                if (!connectedDevice) {
+                  setShowConnectModal(true);
+                  startDiscoveryScan();
+                }
+                console.log(
+                  "WiFi presionado - Estado:",
+                  connectedDevice ? "Conectado" : "Desconectado",
+                );
+              }}
+            />
+            <IconButton
+              icon={<CameraIcon size={28} color={AppRed} />}
+              onPress={handleCameraPress}
+              disabled={!connectedDevice}
+            />
+            {/* Video - temporalmente deshabilitado hasta que esté programado
+            <IconButton
+              icon={<VideoIcon size={28} color={AppRed} />}
+              onPress={() => console.log("Video presionado")}
+              disabled={!connectedDevice}
+            />
+            */}
+            <IconButton
+              icon={<FolderIcon size={28} color={AppRed} />}
+              onPress={() => {
+                loadRecords();
+                setShowGalleryModal(true);
+              }}
+            />
+            <IconButton
+              icon={
+                alarmEnabled ? (
+                  <SoundMaxIcon size={28} color={AppRed} />
+                ) : (
+                  <SoundMuteIcon size={28} color={AppRed} />
+                )
+              }
+              onPress={() => {
+                setAlarmEnabled(!alarmEnabled);
+                console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
+              }}
+              disabled={!connectedDevice}
+            />
+          </View>
+        </>
+      )}
 
       {/* Contenido central que cambia según el estado */}
       {/* Si la cámara está activa, siempre mostrar número y barra (hardcodeados para ajustar estilos) */}
@@ -710,11 +729,8 @@ export default function MainPage() {
                 ]}
               />
             </View>
-            <Text style={styles.warmupLabel}>{warmupPhaseLabel}</Text>
-            <Text style={styles.warmupSubtext}>
-              {warmupProgressPercent < 50
-                ? `Precalentando ${preheatProgress}%`
-                : `Calibrando ${calibratingProgress}%`}
+            <Text style={styles.warmupLabel}>
+              Calibrando {Math.round(warmupProgressPercent)}%
             </Text>
           </View>
         </View>
@@ -1386,6 +1402,22 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 40,
     left: 20,
+    alignItems: "center",
+    zIndex: 20,
+    elevation: 20,
+  },
+  cameraBackButtonContainer: {
+    position: "absolute",
+    bottom: 40,
+    left: 20,
+    alignItems: "center",
+    zIndex: 20,
+    elevation: 20,
+  },
+  cameraSoundButtonContainer: {
+    position: "absolute",
+    bottom: 40,
+    right: 20,
     alignItems: "center",
     zIndex: 20,
     elevation: 20,
