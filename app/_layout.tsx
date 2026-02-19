@@ -41,7 +41,11 @@ export default function RootLayout() {
   }
 
   return (
-    <Stack>
+    <Stack
+      screenOptions={{
+        contentStyle: { backgroundColor: "#2d2d2d" },
+      }}
+    >
       <Stack.Screen
         options={{
           title: "Hydrogenmeter",

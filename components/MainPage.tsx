@@ -1,5 +1,5 @@
 import { usePhotoStorage, PhotoRecord } from "../hooks/usePhotoStorage";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useBLEOrMock } from "../hooks/useBLEOrMock";
 import { ConsoleEntry } from "../hooks/useBLE";
 import { captureRef } from "react-native-view-shot";
@@ -20,12 +20,12 @@ import {
   StyleSheet,
   Alert,
   Animated,
-  Vibration,
   Linking,
   Image,
   Dimensions,
   ActivityIndicator,
 } from "react-native";
+import { Audio } from "expo-av";
 import {
   VideoIcon,
   WifiOffIcon,
@@ -111,17 +111,36 @@ export default function MainPage() {
     updateRecord,
   } = usePhotoStorage();
 
-  // Función para reproducir pitido
-  const playBeep = () => {
+  // Ref para el sonido del pitido (cargado una vez)
+  const beepSoundRef = useRef<Audio.Sound | null>(null);
+
+  // Configurar audio para que el pitido suene aunque el dispositivo esté en silencio
+  useEffect(() => {
+    Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+      interruptionModeAndroid: 1,
+      interruptionModeIOS: 1,
+    }).catch(() => {});
+  }, []);
+
+  const playBeep = useCallback(async () => {
     if (!alarmEnabled) return;
 
     try {
-      // Usar vibración como pitido (duración corta de 100ms)
-      Vibration.vibrate(100);
+      if (!beepSoundRef.current) {
+        const { sound } = await Audio.Sound.createAsync(
+          require("../assets/sounds/beep.mp3")
+        );
+        beepSoundRef.current = sound;
+      }
+      await beepSoundRef.current!.setPositionAsync(0);
+      await beepSoundRef.current!.playAsync();
     } catch (error) {
       console.log("Error reproduciendo pitido:", error);
     }
-  };
+  }, [alarmEnabled]);
 
   // Comparar el valor actual de gasPpm con el anterior y reproducir pitido
   useEffect(() => {
@@ -1290,6 +1309,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#2d2d2d",
+    padding: 0,
+    margin: 0,
   },
   containerWithCamera: {
     backgroundColor: "transparent",
@@ -1332,11 +1353,6 @@ const styles = StyleSheet.create({
     borderColor: AppRed,
     justifyContent: "center",
     alignItems: "center",
-    elevation: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
   },
   connectButtonText: {
     color: AppRed,
