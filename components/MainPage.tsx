@@ -1,6 +1,7 @@
 import { usePhotoStorage, PhotoRecord } from "../hooks/usePhotoStorage";
 import { useState, useEffect, useRef } from "react";
-import { useBLE, ConsoleEntry } from "../hooks/useBLE";
+import { useBLEOrMock } from "../hooks/useBLEOrMock";
+import { ConsoleEntry } from "../hooks/useBLE";
 import { captureRef } from "react-native-view-shot";
 import { IconButton } from "./IconButton";
 import { CameraView } from "./CameraView";
@@ -45,6 +46,7 @@ import {
 
 import TextInput from "./Inputs/TextInput";
 import DateInput from "./Inputs/DateInput";
+import { MOCK_BLE_ENABLED } from "@/constants/mockBLE";
 
 export default function MainPage() {
   const {
@@ -67,7 +69,7 @@ export default function MainPage() {
     discoveredDevices,
     connectToDevice,
     isScanning,
-  } = useBLE();
+  } = useBLEOrMock();
 
   // Barra unificada: 0–50% = PREHEAT, 50–100% = CALIBRATING
   const warmupProgressPercent =
@@ -147,6 +149,13 @@ export default function MainPage() {
       previousPpmRef.current = gasPpm;
     }
   }, [gasPpm, alarmEnabled]);
+
+  // Iniciar escaneo cuando se abre el modal de conexión (asegura que el mock muestre el dispositivo)
+  useEffect(() => {
+    if (showConnectModal) {
+      startDiscoveryScan();
+    }
+  }, [showConnectModal, startDiscoveryScan]);
 
   // Cerrar la cámara automáticamente cuando se desconecta el dispositivo
   useEffect(() => {
@@ -270,9 +279,11 @@ export default function MainPage() {
       console.log("Foto capturada:", photo);
       if (photo?.uri) {
         console.log("URI de la foto:", photo.uri);
+        // 1. Almacenar la medición en estado general (antes de mostrar overlay)
+        setPhotoSensorValue(gasPpm);
         // Resetear el estado de carga de imagen
         setImageLoaded(false);
-        // Guardar temporalmente la URI para crear la vista con overlay
+        // 2. Guardar temporalmente la URI para crear la vista con overlay
         setTempPhotoUri(photo.uri);
       } else {
         console.error("La foto no tiene URI");
@@ -345,10 +356,9 @@ export default function MainPage() {
     }
   };
 
-  // Función para manejar cuando se toma una foto
+  // Función para manejar cuando se toma una foto (photoSensorValue ya está en estado desde handleTakePicture)
   const handlePhotoTaken = (uri: string) => {
     setCapturedPhoto(uri);
-    setPhotoSensorValue(gasPpm);
     setIsProcessingPhoto(false);
     setShowCamera(false);
     setShowPhotoFormModal(true);
@@ -463,14 +473,14 @@ export default function MainPage() {
           <View style={styles.overlayTopLeft}>
             <Text style={styles.overlayTextTop}>HYDROGEN METER</Text>
           </View>
-          {/* Número del sensor abajo centrado (3er cuadrante) */}
+          {/* Número del sensor abajo centrado (3er cuadrante) - usa la medición almacenada al tomar la foto */}
           <View style={styles.overlayBottomCenter}>
             <Text
               style={styles.overlayTextCenter}
               adjustsFontSizeToFit
               numberOfLines={1}
             >
-              {gasPpm !== null ? gasPpm : "--"}
+              {photoSensorValue !== null ? photoSensorValue : "--"}
             </Text>
           </View>
           {/* Fecha abajo a la derecha */}
@@ -888,7 +898,7 @@ export default function MainPage() {
                 {discoveredDevices.length === 0 && !isScanning ? (
                   <Text style={styles.modalEmptyText}>
                     No se encontraron dispositivos. Asegúrate de que el
-                    Bluetooth esté encendido y el dispositivo cerca.
+                    Bluetooth esté encendido y el dispositivo cerca. {MOCK_BLE_ENABLED ? " (usando mock)" : ""}
                   </Text>
                 ) : (
                   discoveredDevices.map((device) => (

@@ -2,20 +2,20 @@
   "expo": {
     "name": "hydrogen",
     "slug": "hydrogen",
-    "version": "1.0.0",
-    "runtimeVersion": "1.0.0",
+    "version": "1.0.2",
+    "runtimeVersion": "1.0.2",
     "orientation": "portrait",
-    "icon": "./assets/images/logo.png",
+    "icon": "./assets/images/logo-icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/images/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#fe0000"
+      "backgroundColor": "#2d2d2d"
     },
     "splashScreen": {
       "resizeMode": "contain",
-      "backgroundColor": "#fe0000"
+      "backgroundColor": "#2d2d2d"
     },
     "ios": {
       "supportsTablet": true,
@@ -26,7 +26,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/logo.png",
+        "foregroundImage": "./assets/images/logo-icon.png",
         "backgroundColor": "#F44336"
       },
       "permissions": [
@@ -42,7 +42,7 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/logo.png"
+      "favicon": "./assets/images/logo-icon.png"
     },
     "plugins": [
       ["expo-router"],
@@ -59,7 +59,8 @@
         {
           "cameraPermission": "Permitir acceso a la cámara para capturar imágenes"
         }
-      ]
+      ],
+      "./plugins/withAndroidLint"
     ],
     "experiments": {
       "typedRoutes": true
