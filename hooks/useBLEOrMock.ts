@@ -1,6 +1,6 @@
-import { useBLE } from "./useBLE";
-import { useBLEMock } from "./useBLEMock";
 import { MOCK_BLE_ENABLED } from "../constants/mockBLE";
+import { useBLEMock } from "./useBLEMock";
+import { useBLE } from "./useBLE";
 
 /**
  * Devuelve useBLE (real) o useBLEMock (simulado) según MOCK_BLE_ENABLED.

@@ -797,14 +797,25 @@ export const useBLE = () => {
 
   // addConsoleMessage ya viene del store de Zustand
 
-  // Detener escaneo BLE (para cerrar modal o al seleccionar dispositivo)
-  const stopScan = () => {
+  // Detener escaneo BLE (para cerrar modal o al seleccionar dispositivo).
+  // Opcionalmente espera un poco para que la capa nativa libere el escaneo.
+  const stopScan = (options?: { waitBeforeNextScan?: boolean }) => {
     if (scanTimeoutRef.current) {
       clearTimeout(scanTimeoutRef.current);
       scanTimeoutRef.current = null;
     }
-    bleManager.stopDeviceScan();
+    try {
+      bleManager.stopDeviceScan();
+    } catch {
+      // Ignorar si ya estaba detenido
+    }
     setIsScanning(false);
+    if (options?.waitBeforeNextScan) {
+      return new Promise<void>((resolve) =>
+        setTimeout(resolve, 450),
+      );
+    }
+    return Promise.resolve();
   };
 
   // Escaneo para descubrir dispositivos y mostrarlos en el modal (sin auto-conectar)
@@ -829,38 +840,53 @@ export const useBLE = () => {
       return;
     }
 
-    if (isScanningRef.current) {
-      bleManager.stopDeviceScan();
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
+    // Siempre detener cualquier escaneo previo y esperar a que la capa nativa lo libere
+    // (evita "Cannot start scanning operation" al abrir/cerrar el modal varias veces)
+    await stopScan({ waitBeforeNextScan: true });
 
     clearDiscoveredDevices();
     setIsScanning(true);
     addConsoleMessage("🔍 Buscando dispositivos...");
 
-    bleManager.startDeviceScan(null, null, (error, device) => {
-      if (error) {
-        console.error("Error en escaneo:", error);
-        const isNotAuthorized =
-          error.message?.includes("not authorized") ||
-          error.message?.includes("Device is not authorized");
-        if (isNotAuthorized) {
-          addConsoleMessage(
-            "[ERROR] Bluetooth no autorizado. Ve a Ajustes > Apps > Hydrogen y activa los permisos de Bluetooth.",
-          );
-        } else {
-          addConsoleMessage(`[ERROR] ${error.message}`);
+    try {
+      bleManager.startDeviceScan(null, null, (error, device) => {
+        if (error) {
+          console.error("Error en escaneo:", error);
+          const isNotAuthorized =
+            error.message?.includes("not authorized") ||
+            error.message?.includes("Device is not authorized");
+          if (isNotAuthorized) {
+            addConsoleMessage(
+              "[ERROR] Bluetooth no autorizado. Ve a Ajustes > Apps > Hydrogen y activa los permisos de Bluetooth.",
+            );
+          } else {
+            addConsoleMessage(`[ERROR] ${error.message}`);
+          }
+          setIsScanning(false);
+          return;
         }
-        setIsScanning(false);
-        return;
+        if (device) {
+          addDiscoveredDevice(device);
+        }
+      });
+    } catch (scanError: any) {
+      setIsScanning(false);
+      const msg = scanError?.message ?? String(scanError);
+      addConsoleMessage(`[ERROR] ${msg}`);
+      if (msg.includes("Cannot start scanning")) {
+        addConsoleMessage(
+          "[INFO] Cierra el modal, espera unos segundos y vuelve a intentar.",
+        );
       }
-      if (device) {
-        addDiscoveredDevice(device);
-      }
-    });
+      return;
+    }
 
     scanTimeoutRef.current = setTimeout(() => {
-      bleManager.stopDeviceScan();
+      try {
+        bleManager.stopDeviceScan();
+      } catch {
+        // Ignorar si ya estaba detenido
+      }
       setIsScanning(false);
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);

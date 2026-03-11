@@ -3,7 +3,7 @@ import type { Device } from "react-native-ble-plx";
 import type { ConsoleEntry } from "./useBLE";
 
 /** Dispositivo simulado para el mock */
-const MOCK_DEVICE: Device = {
+const MOCK_DEVICE = {
   id: "MOCK:00:00:00:00:00:00",
   name: "HYDROGENMETER (Simulado)",
   localName: "HYDROGENMETER",
@@ -31,7 +31,7 @@ const MOCK_DEVICE: Device = {
   requestMTU: () => Promise.resolve(MOCK_DEVICE),
   connectToDevice: () => Promise.resolve(MOCK_DEVICE),
   onDisconnected: () => ({ remove: () => {} }),
-} as Device;
+} as unknown as Device;
 
 const addConsoleEntry = (
   entries: ConsoleEntry[],

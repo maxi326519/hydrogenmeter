@@ -17,4 +17,4 @@ export default function Index() {
       <MainPage />
     </View>
   );
-}
+} 

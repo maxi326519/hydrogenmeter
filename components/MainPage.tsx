@@ -1,16 +1,17 @@
-import { usePhotoStorage, PhotoRecord } from "../hooks/usePhotoStorage";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { usePhotoStorage, PhotoRecord } from "../hooks/usePhotoStorage";
+import { MOCK_BLE_ENABLED } from "@/constants/mockBLE";
 import { useBLEOrMock } from "../hooks/useBLEOrMock";
 import { ConsoleEntry } from "../hooks/useBLE";
 import { captureRef } from "react-native-view-shot";
 import { IconButton } from "./IconButton";
 import { CameraView } from "./CameraView";
 import { AppRed } from "../constants/Colors";
+import { Audio } from "expo-av";
 import {
   useCameraPermissions,
   CameraView as ExpoCameraView,
 } from "expo-camera";
-
 import {
   Text,
   View,
@@ -25,9 +26,7 @@ import {
   Dimensions,
   ActivityIndicator,
 } from "react-native";
-import { Audio } from "expo-av";
 import {
-  VideoIcon,
   WifiOffIcon,
   WifiOnIcon,
   CameraIcon,
@@ -46,8 +45,6 @@ import {
 } from "./Icons";
 
 import TextInput from "./Inputs/TextInput";
-import DateInput from "./Inputs/DateInput";
-import { MOCK_BLE_ENABLED } from "@/constants/mockBLE";
 
 export default function MainPage() {
   const {
@@ -122,7 +119,7 @@ export default function MainPage() {
       shouldDuckAndroid: true,
       interruptionModeAndroid: 1,
       interruptionModeIOS: 1,
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   const playBeep = useCallback(async () => {
@@ -173,7 +170,7 @@ export default function MainPage() {
     if (showConnectModal) {
       startDiscoveryScan();
     }
-  }, [showConnectModal, startDiscoveryScan]);
+  }, [showConnectModal]);
 
   // Cerrar la cámara automáticamente cuando se desconecta el dispositivo
   useEffect(() => {
@@ -1133,50 +1130,54 @@ export default function MainPage() {
             {/* Información del registro */}
             {fullImageRecord && (
               <>
-                {/* Valor del sensor */}
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    name="sensorValue"
-                    label="Valor del Sensor"
-                    value={
-                      fullImageRecord.sensorValue !== null
-                        ? fullImageRecord.sensorValue.toString()
-                        : ""
-                    }
-                    onChange={() => {}}
-                    disabled={true}
-                    style={styles.darkInput}
-                  />
+                {/* Valor del sensor (solo lectura) */}
+                <View style={styles.readOnlyField}>
+                  <Text style={styles.readOnlyFieldLabel}>Valor del Sensor</Text>
+                  <Text style={styles.readOnlyFieldValue}>
+                    {fullImageRecord.sensorValue !== null
+                      ? fullImageRecord.sensorValue.toString()
+                      : "--"}
+                  </Text>
                 </View>
 
-                {/* Fecha */}
-                <View style={styles.inputWrapper}>
-                  <DateInput
-                    name="timestamp"
-                    label="Fecha"
-                    value={new Date(fullImageRecord.timestamp)}
-                    onChange={() => {}}
-                    disabled={true}
-                    style={styles.darkInput}
-                  />
+                {/* Fecha (solo lectura) */}
+                <View style={styles.readOnlyField}>
+                  <Text style={styles.readOnlyFieldLabel}>Fecha</Text>
+                  <Text style={styles.readOnlyFieldValue}>
+                    {new Date(fullImageRecord.timestamp).toLocaleString(
+                      "es-ES",
+                      {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      },
+                    )}
+                  </Text>
                 </View>
 
-                {/* Ubicación */}
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    name="location"
-                    label="Ubicación"
-                    value={
-                      isEditingLocation
-                        ? editingLocation
-                        : fullImageRecord.location || ""
-                    }
-                    onChange={(name, value) => setEditingLocation(value)}
-                    disabled={!isEditingLocation}
-                    style={styles.darkInput}
-                    placeholder="No especificada"
-                  />
-                </View>
+                {/* Ubicación: solo texto hasta que se pulse Editar */}
+                {!isEditingLocation ? (
+                  <View style={styles.readOnlyField}>
+                    <Text style={styles.readOnlyFieldLabel}>Ubicación</Text>
+                    <Text style={styles.readOnlyFieldValue}>
+                      {fullImageRecord.location || "No especificada"}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.inputWrapper}>
+                    <TextInput
+                      name="location"
+                      label="Ubicación"
+                      value={editingLocation}
+                      onChange={(name, value) => setEditingLocation(value)}
+                      disabled={false}
+                      style={styles.darkInput}
+                      placeholder="No especificada"
+                    />
+                  </View>
+                )}
               </>
             )}
           </ScrollView>
@@ -1720,6 +1721,19 @@ const styles = StyleSheet.create({
   fullImageThumbnail: {
     width: "100%",
     height: "100%",
+  },
+  readOnlyField: {
+    marginBottom: 16,
+  },
+  readOnlyFieldLabel: {
+    fontSize: 14,
+    color: "#888",
+    marginBottom: 4,
+  },
+  readOnlyFieldValue: {
+    fontSize: 16,
+    color: "#fff",
+    fontWeight: "500",
   },
   fullImageInfo: {
     flex: 1,
