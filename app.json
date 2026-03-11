@@ -21,7 +21,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.rotech.bleconnection",
       "infoPlist": {
-        "NSCameraUsageDescription": "Esta app necesita acceso a la cámara para capturar imágenes"
+        "NSCameraUsageDescription": "Esta app necesita acceso a la cámara para capturar imágenes",
+        "NSMicrophoneUsageDescription": "Para grabar audio junto con el video de medición"
       }
     },
     "android": {
@@ -35,7 +36,10 @@
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.RECORD_AUDIO"
       ],
       "package": "com.rotech.ble_connection"
     },

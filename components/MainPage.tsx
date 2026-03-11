@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePhotoStorage, PhotoRecord } from "../hooks/usePhotoStorage";
+import { useVideoStorage, VideoRecord } from "../hooks/useVideoStorage";
 import { MOCK_BLE_ENABLED } from "@/constants/mockBLE";
 import { useBLEOrMock } from "../hooks/useBLEOrMock";
 import { ConsoleEntry } from "../hooks/useBLE";
 import { captureRef } from "react-native-view-shot";
 import { IconButton } from "./IconButton";
 import { CameraView } from "./CameraView";
+import { VideoRecordingCameraView } from "./VideoRecordingCameraView";
 import { AppRed } from "../constants/Colors";
-import { Audio } from "expo-av";
+import { Audio, Video, ResizeMode } from "expo-av";
 import {
   useCameraPermissions,
   CameraView as ExpoCameraView,
@@ -30,6 +32,7 @@ import {
   WifiOffIcon,
   WifiOnIcon,
   CameraIcon,
+  VideoIcon,
   FolderIcon,
   SoundMaxIcon,
   SoundMuteIcon,
@@ -45,6 +48,7 @@ import {
 } from "./Icons";
 
 import TextInput from "./Inputs/TextInput";
+import RecordScreen from "react-native-record-screen";
 
 export default function MainPage() {
   const {
@@ -76,6 +80,7 @@ export default function MainPage() {
   const [showLogModal, setShowLogModal] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [cameraMode, setCameraMode] = useState<"photo" | "video">("photo");
   const [alarmEnabled, setAlarmEnabled] = useState(false);
   const [ppmDirection, setPpmDirection] = useState<"up" | "down" | null>(null);
   const previousPpmRef = useRef<number | null>(null);
@@ -91,6 +96,9 @@ export default function MainPage() {
   );
   const [showFullImageViewer, setShowFullImageViewer] = useState(false);
   const [viewerImageUri, setViewerImageUri] = useState<string | null>(null);
+  const [showVideoViewerModal, setShowVideoViewerModal] = useState(false);
+  const [viewerVideoUri, setViewerVideoUri] = useState<string | null>(null);
+  const [fullVideoRecord, setFullVideoRecord] = useState<VideoRecord | null>(null);
   const [isEditingLocation, setIsEditingLocation] = useState(false);
   const [editingLocation, setEditingLocation] = useState<string>("");
   const [photoSensorValue, setPhotoSensorValue] = useState<number | null>(null);
@@ -100,6 +108,14 @@ export default function MainPage() {
   const [isProcessingPhoto, setIsProcessingPhoto] = useState<boolean>(false);
   const cameraRef = useRef<ExpoCameraView>(null);
   const photoWithOverlayRef = useRef<View>(null);
+  const [isVideoRecording, setIsVideoRecording] = useState(false);
+  const [videoRecordingDuration, setVideoRecordingDuration] = useState(0);
+  const [videoMicEnabled, setVideoMicEnabled] = useState(true);
+  const videoRecordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [capturedVideoUri, setCapturedVideoUri] = useState<string | null>(null);
+  const [videoSensorValue, setVideoSensorValue] = useState<number | null>(null);
+  const [videoLocation, setVideoLocation] = useState<string>("");
+  const [showVideoFormModal, setShowVideoFormModal] = useState(false);
   const {
     createRecord,
     records,
@@ -107,6 +123,22 @@ export default function MainPage() {
     loadRecords,
     updateRecord,
   } = usePhotoStorage();
+  const {
+    records: videoRecords,
+    createRecord: createVideoRecord,
+    loadRecords: loadVideoRecords,
+    deleteRecord: deleteVideoRecord,
+  } = useVideoStorage();
+
+  // Limpiar intervalo de grabación al desmontar o cambiar de modo
+  useEffect(() => {
+    return () => {
+      if (videoRecordingIntervalRef.current) {
+        clearInterval(videoRecordingIntervalRef.current);
+        videoRecordingIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   // Ref para el sonido del pitido (cargado una vez)
   const beepSoundRef = useRef<Audio.Sound | null>(null);
@@ -241,6 +273,111 @@ export default function MainPage() {
     }
   };
 
+  const handleVideoRecordingComplete = useCallback(
+    (videoUri: string) => {
+      setCapturedVideoUri(videoUri);
+      setVideoSensorValue(gasPpm);
+      setShowCamera(false);
+      setCameraMode("photo");
+      setShowVideoFormModal(true);
+    },
+    [gasPpm]
+  );
+
+  const handleStartVideoRecording = useCallback(async () => {
+    if (isVideoRecording) return;
+    try {
+      const result = await RecordScreen.startRecording({ mic: videoMicEnabled });
+      if (result === "permission_error") {
+        Alert.alert(
+          "Permiso denegado",
+          "Se necesita permiso para grabar la pantalla."
+        );
+        return;
+      }
+      setIsVideoRecording(true);
+      setVideoRecordingDuration(0);
+      videoRecordingIntervalRef.current = setInterval(() => {
+        setVideoRecordingDuration((d) => d + 0.1);
+      }, 100);
+    } catch (error) {
+      console.error("Error iniciando grabación:", error);
+      Alert.alert(
+        "Error",
+        `No se pudo iniciar la grabación: ${(error as Error).message}`
+      );
+    }
+  }, [isVideoRecording]);
+
+  const handleStopVideoRecording = useCallback(async () => {
+    if (!isVideoRecording) return;
+    try {
+      if (videoRecordingIntervalRef.current) {
+        clearInterval(videoRecordingIntervalRef.current);
+        videoRecordingIntervalRef.current = null;
+      }
+      setIsVideoRecording(false);
+      const result = await RecordScreen.stopRecording();
+      if (result && result.status === "success" && result.result?.outputURL) {
+        let videoUri = result.result.outputURL;
+        // Asegurar formato URI para FileSystem (expo usa file://)
+        if (!videoUri.startsWith("file://") && !videoUri.startsWith("content://")) {
+          videoUri = `file://${videoUri}`;
+        }
+        handleVideoRecordingComplete(videoUri);
+      } else {
+        Alert.alert("Error", "No se pudo guardar el video grabado.");
+      }
+    } catch (error) {
+      setIsVideoRecording(false);
+      console.error("Error deteniendo grabación:", error);
+      Alert.alert(
+        "Error",
+        `No se pudo detener la grabación: ${(error as Error).message}`
+      );
+    }
+  }, [isVideoRecording, handleVideoRecordingComplete]);
+
+  const handleSaveVideo = async () => {
+    if (!capturedVideoUri) {
+      Alert.alert("Error", "No hay video para guardar");
+      return;
+    }
+    try {
+      await createVideoRecord(
+        capturedVideoUri,
+        videoSensorValue,
+        videoLocation || undefined
+      );
+      Alert.alert("Éxito", "Video guardado correctamente");
+      setShowVideoFormModal(false);
+      setCapturedVideoUri(null);
+      setVideoSensorValue(null);
+      setVideoLocation("");
+    } catch (error) {
+      console.error("Error guardando video:", error);
+      Alert.alert("Error", "No se pudo guardar el video. Intenta nuevamente.");
+    }
+  };
+
+  // Función para abrir cámara en modo video (desde botón Video en barra principal)
+  const handleVideoPress = async () => {
+    if (!connectedDevice) return;
+
+    if (!cameraPermission) return;
+
+    if (!cameraPermission.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        setShowCamera(true);
+        return;
+      }
+    }
+
+    setCameraMode("video");
+    setShowCamera(true);
+  };
+
   // Función para manejar el botón de cámara (toggle)
   const handleCameraPress = async () => {
     // Solo funciona si el equipo está conectado
@@ -251,6 +388,7 @@ export default function MainPage() {
     // Si la cámara ya está activa, cerrarla
     if (showCamera) {
       setShowCamera(false);
+      setCameraMode("photo");
       return;
     }
 
@@ -513,11 +651,27 @@ export default function MainPage() {
 
       {/* Cámara de fondo cuando tiene permisos */}
       {showCamera && cameraPermission?.granted && (
-        <CameraView
-          visible={showCamera}
-          onClose={() => setShowCamera(false)}
-          cameraRef={cameraRef}
-        />
+        <>
+          {cameraMode === "photo" ? (
+            <CameraView
+              visible={showCamera}
+              onClose={() => {
+                setShowCamera(false);
+                setCameraMode("photo");
+              }}
+              cameraRef={cameraRef}
+            />
+          ) : (
+            <VideoRecordingCameraView
+              visible={showCamera}
+              cameraRef={cameraRef}
+              gasPpm={gasPpm}
+              ppmDirection={ppmDirection}
+              isRecording={isVideoRecording}
+              recordedDuration={videoRecordingDuration}
+            />
+          )}
+        </>
       )}
 
       {/* Batería arriba a la derecha - nivel real cuando hay dato (equipo enviando) */}
@@ -529,33 +683,90 @@ export default function MainPage() {
         )}
       </View>
 
-      {/* Botones: modo cámara (solo volver + sonido) o modo normal (todos) */}
+      {/* Botones: modo cámara (volver + sonido + foto/video) o modo normal (todos) */}
       {showCamera && cameraPermission?.granted ? (
-        <>
-          {/* Botón volver - izquierda */}
-          <View style={styles.cameraBackButtonContainer}>
-            <IconButton
-              icon={<ArrowBackIcon size={28} color={AppRed} />}
-              onPress={() => setShowCamera(false)}
-            />
-          </View>
-          {/* Botón sonido - derecha */}
-          <View style={styles.cameraSoundButtonContainer}>
-            <IconButton
-              icon={
-                alarmEnabled ? (
-                  <SoundMaxIcon size={28} color={AppRed} />
-                ) : (
-                  <SoundMuteIcon size={28} color={AppRed} />
-                )
-              }
-              onPress={() => {
-                setAlarmEnabled(!alarmEnabled);
-                console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
-              }}
-            />
-          </View>
-        </>
+        cameraMode === "photo" ? (
+          <>
+            {/* Botón volver - izquierda */}
+            <View style={styles.cameraBackButtonContainer}>
+              <IconButton
+                icon={<ArrowBackIcon size={28} color={AppRed} />}
+                onPress={() => {
+                  setShowCamera(false);
+                  setCameraMode("photo");
+                }}
+              />
+            </View>
+            {/* Botón video - centro derecho: cambiar a modo video */}
+            <View style={styles.cameraVideoButtonContainer}>
+              <IconButton
+                icon={<VideoIcon size={28} color={AppRed} />}
+                onPress={() => setCameraMode("video")}
+              />
+            </View>
+            {/* Botón sonido - derecha */}
+            <View style={styles.cameraSoundButtonContainer}>
+              <IconButton
+                icon={
+                  alarmEnabled ? (
+                    <SoundMaxIcon size={28} color={AppRed} />
+                  ) : (
+                    <SoundMuteIcon size={28} color={AppRed} />
+                  )
+                }
+                onPress={() => {
+                  setAlarmEnabled(!alarmEnabled);
+                  console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
+                }}
+              />
+            </View>
+          </>
+        ) : (
+          /* Modo video: Volver, Micrófono, Grabar */
+          <>
+            <View style={styles.cameraBackButtonContainer}>
+              <IconButton
+                icon={<ArrowBackIcon size={28} color={AppRed} />}
+                onPress={() => {
+                  setShowCamera(false);
+                  setCameraMode("photo");
+                }}
+                disabled={isVideoRecording}
+              />
+            </View>
+            {!isVideoRecording && (
+              <View style={styles.cameraVideoMicButtonContainer}>
+                <IconButton
+                  icon={
+                    videoMicEnabled ? (
+                      <SoundMaxIcon size={28} color={AppRed} />
+                    ) : (
+                      <SoundMuteIcon size={28} color={AppRed} />
+                    )
+                  }
+                  onPress={() => setVideoMicEnabled(!videoMicEnabled)}
+                />
+              </View>
+            )}
+            <View style={styles.cameraVideoRecordButtonContainer}>
+              {isVideoRecording ? (
+                <TouchableOpacity
+                  style={[styles.videoRecordButton, styles.videoStopButton]}
+                  onPress={handleStopVideoRecording}
+                >
+                  <Text style={styles.videoRecordButtonText}>Detener</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.videoRecordButton}
+                  onPress={handleStartVideoRecording}
+                >
+                  <Text style={styles.videoRecordButtonText}>Grabar</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </>
+        )
       ) : (
         <>
           {/* Botón de log abajo a la izquierda */}
@@ -592,17 +803,16 @@ export default function MainPage() {
               onPress={handleCameraPress}
               disabled={!connectedDevice}
             />
-            {/* Video - temporalmente deshabilitado hasta que esté programado
             <IconButton
               icon={<VideoIcon size={28} color={AppRed} />}
-              onPress={() => console.log("Video presionado")}
+              onPress={handleVideoPress}
               disabled={!connectedDevice}
             />
-            */}
             <IconButton
               icon={<FolderIcon size={28} color={AppRed} />}
-              onPress={() => {
-                loadRecords();
+              onPress={async () => {
+                await loadRecords();
+                await loadVideoRecords();
                 setShowGalleryModal(true);
               }}
             />
@@ -625,8 +835,8 @@ export default function MainPage() {
       )}
 
       {/* Contenido central que cambia según el estado */}
-      {/* Si la cámara está activa, siempre mostrar número y barra (hardcodeados para ajustar estilos) */}
-      {showCamera && cameraPermission?.granted ? (
+      {/* Si la cámara está activa en modo foto, mostrar número y barra como overlay */}
+      {showCamera && cameraPermission?.granted && cameraMode === "photo" ? (
         <View style={styles.ppmOverlay}>
           {/* Barra de rango 0-10,000 */}
           <View style={styles.rangeBarContainerCamera}>
@@ -663,6 +873,9 @@ export default function MainPage() {
             </View>
           </View>
         </View>
+      ) : showCamera && cameraMode === "video" ? (
+        /* Modo video: no mostrar barra/ppm de MainPage (VideoRecordingCameraView tiene el suyo) */
+        null
       ) : !connectedDevice ? (
         // Estado: No conectado - solo mostrar si la cámara no está activa
         <>
@@ -752,8 +965,8 @@ export default function MainPage() {
         </View>
       )}
 
-      {/* Botón de captura - por encima de todo */}
-      {showCamera && cameraPermission?.granted && (
+      {/* Botón de captura - por encima de todo (solo en modo foto) */}
+      {showCamera && cameraPermission?.granted && cameraMode === "photo" && (
         <View style={styles.captureButtonContainer}>
           <TouchableOpacity
             style={styles.captureButton}
@@ -965,6 +1178,90 @@ export default function MainPage() {
                 {isScanning ? " · Buscando..." : ""}
               </Text>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de formulario de video */}
+      <Modal
+        visible={showVideoFormModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowVideoFormModal(false)}
+      >
+        <View style={styles.photoFormModalContainer}>
+          <View style={styles.photoFormModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Nuevo Video</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => {
+                  setShowVideoFormModal(false);
+                  setCapturedVideoUri(null);
+                  setVideoSensorValue(null);
+                  setVideoLocation("");
+                }}
+              >
+                <Text style={styles.modalCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalScrollView}>
+              <View style={styles.photoFormContainer}>
+                {/* Reproducir video grabado */}
+                {capturedVideoUri && (
+                  <View style={styles.videoPreviewContainer}>
+                    <Video
+                      style={styles.videoPreviewPlayer}
+                      source={{ uri: capturedVideoUri }}
+                      useNativeControls
+                      resizeMode={ResizeMode.CONTAIN}
+                      shouldPlay={false}
+                    />
+                    <Text style={styles.videoPreviewText}>Vista previa del video</Text>
+                  </View>
+                )}
+
+                {/* Valor del sensor */}
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    name="sensorValue"
+                    label="Valor del Sensor"
+                    value={
+                      videoSensorValue !== null
+                        ? videoSensorValue.toString()
+                        : ""
+                    }
+                    onChange={(name, value) => {
+                      const numValue = parseInt(value) || null;
+                      setVideoSensorValue(numValue);
+                    }}
+                    placeholder="Ingrese el valor del sensor"
+                    disabled={true}
+                    style={styles.darkInput}
+                  />
+                </View>
+
+                {/* Ubicación */}
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    name="location"
+                    label="Ubicación"
+                    value={videoLocation}
+                    onChange={(name, value) => setVideoLocation(value)}
+                    placeholder="Ingrese la ubicación donde se grabó el video"
+                    style={styles.darkInput}
+                  />
+                </View>
+
+                {/* Botón de guardar */}
+                <TouchableOpacity
+                  style={styles.saveButton}
+                  onPress={handleSaveVideo}
+                >
+                  <Text style={styles.saveButtonText}>Guardar</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1214,7 +1511,7 @@ export default function MainPage() {
         </View>
       </Modal>
 
-      {/* Modal de galería */}
+      {/* Modal de galería (fotos + videos) */}
       <Modal
         visible={showGalleryModal}
         animationType="slide"
@@ -1223,7 +1520,7 @@ export default function MainPage() {
       >
         <View style={styles.galleryModalContainer}>
           <View style={styles.galleryModalHeader}>
-            <Text style={styles.modalTitle}>Galería de Fotos</Text>
+            <Text style={styles.modalTitle}>Galería</Text>
             <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => setShowGalleryModal(false)}
@@ -1232,74 +1529,197 @@ export default function MainPage() {
             </TouchableOpacity>
           </View>
           <ScrollView style={styles.galleryModalScrollView}>
-            {records.length === 0 ? (
+            {records.length === 0 && videoRecords.length === 0 ? (
               <Text style={styles.modalEmptyText}>
-                No hay fotos guardadas aún
+                No hay fotos ni videos guardados aún
               </Text>
             ) : (
-              records.map((record) => (
-                <TouchableOpacity
-                  key={record.id}
-                  style={styles.galleryItem}
-                  onPress={() => {
-                    setFullImageUri(record.imageUri);
-                    setFullImageRecord(record);
-                    setShowGalleryModal(false);
-                    setShowFullImageModal(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.galleryThumbnailContainer}>
-                    <Image
-                      source={{ uri: record.imageUri }}
-                      style={styles.galleryThumbnail}
-                    />
-                  </View>
-                  <View style={styles.galleryInfo}>
-                    <Text style={styles.gallerySensorValue}>
-                      {record.sensorValue !== null ? record.sensorValue : "--"}
-                    </Text>
-                    <Text style={styles.galleryTimestamp}>
-                      {new Date(record.timestamp).toLocaleString()}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.deleteButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      Alert.alert(
-                        "Eliminar Foto",
-                        "¿Estás seguro de que quieres eliminar esta foto?",
-                        [
-                          { text: "Cancelar", style: "cancel" },
-                          {
-                            text: "Eliminar",
-                            style: "destructive",
-                            onPress: async () => {
-                              try {
-                                await deleteRecord(record.id);
-                                Alert.alert(
-                                  "Éxito",
-                                  "Foto eliminada correctamente",
-                                );
-                              } catch (error) {
-                                Alert.alert(
-                                  "Error",
-                                  "No se pudo eliminar la foto",
-                                );
-                              }
-                            },
-                          },
-                        ],
-                      );
-                    }}
-                  >
-                    <Text style={styles.deleteButtonText}>🗑️</Text>
-                  </TouchableOpacity>
-                </TouchableOpacity>
-              ))
+              [...records.map((r) => ({ type: "photo" as const, record: r, id: r.id })),
+               ...videoRecords.map((r) => ({ type: "video" as const, record: r, id: r.id })),
+              ]
+                .sort(
+                  (a, b) =>
+                    new Date(b.record.timestamp).getTime() -
+                    new Date(a.record.timestamp).getTime()
+                )
+                .map((item) =>
+                  item.type === "photo" ? (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.galleryItem}
+                      onPress={() => {
+                        setFullImageUri(item.record.imageUri);
+                        setFullImageRecord(item.record);
+                        setShowGalleryModal(false);
+                        setShowFullImageModal(true);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.galleryThumbnailContainer}>
+                        <Image
+                          source={{ uri: item.record.imageUri }}
+                          style={styles.galleryThumbnail}
+                        />
+                      </View>
+                      <View style={styles.galleryInfo}>
+                        <Text style={styles.gallerySensorValue}>
+                          {item.record.sensorValue !== null
+                            ? item.record.sensorValue
+                            : "--"}
+                        </Text>
+                        <Text style={styles.galleryTimestamp}>
+                          {new Date(item.record.timestamp).toLocaleString()}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          Alert.alert(
+                            "Eliminar Foto",
+                            "¿Estás seguro de que quieres eliminar esta foto?",
+                            [
+                              { text: "Cancelar", style: "cancel" },
+                              {
+                                text: "Eliminar",
+                                style: "destructive",
+                                onPress: async () => {
+                                  try {
+                                    await deleteRecord(item.record.id);
+                                    Alert.alert(
+                                      "Éxito",
+                                      "Foto eliminada correctamente",
+                                    );
+                                  } catch (error) {
+                                    Alert.alert(
+                                      "Error",
+                                      "No se pudo eliminar la foto",
+                                    );
+                                  }
+                                },
+                              },
+                            ],
+                          );
+                        }}
+                      >
+                        <Text style={styles.deleteButtonText}>🗑️</Text>
+                      </TouchableOpacity>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.galleryItem}
+                      onPress={() => {
+                        setViewerVideoUri(item.record.videoUri);
+                        setFullVideoRecord(item.record);
+                        setShowGalleryModal(false);
+                        setShowVideoViewerModal(true);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.galleryThumbnailContainer}>
+                        <View style={styles.galleryVideoThumbnail}>
+                          <VideoIcon size={40} color={AppRed} />
+                          <Text style={styles.galleryVideoLabel}>Video</Text>
+                        </View>
+                      </View>
+                      <View style={styles.galleryInfo}>
+                        <Text style={styles.gallerySensorValue}>
+                          {item.record.sensorValue !== null
+                            ? item.record.sensorValue
+                            : "--"}
+                        </Text>
+                        <Text style={styles.galleryTimestamp}>
+                          {new Date(item.record.timestamp).toLocaleString()}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          Alert.alert(
+                            "Eliminar Video",
+                            "¿Estás seguro de que quieres eliminar este video?",
+                            [
+                              { text: "Cancelar", style: "cancel" },
+                              {
+                                text: "Eliminar",
+                                style: "destructive",
+                                onPress: async () => {
+                                  try {
+                                    await deleteVideoRecord(item.record.id);
+                                    Alert.alert(
+                                      "Éxito",
+                                      "Video eliminado correctamente",
+                                    );
+                                  } catch (error) {
+                                    Alert.alert(
+                                      "Error",
+                                      "No se pudo eliminar el video",
+                                    );
+                                  }
+                                },
+                              },
+                            ],
+                          );
+                        }}
+                      >
+                        <Text style={styles.deleteButtonText}>🗑️</Text>
+                      </TouchableOpacity>
+                    </TouchableOpacity>
+                  )
+                )
             )}
           </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Modal de reproductor de video */}
+      <Modal
+        visible={showVideoViewerModal}
+        animationType="fade"
+        transparent={false}
+        onRequestClose={() => {
+          setShowVideoViewerModal(false);
+          setViewerVideoUri(null);
+          setFullVideoRecord(null);
+        }}
+      >
+        <View style={styles.videoViewerContainer}>
+          <TouchableOpacity
+            style={styles.videoViewerCloseButton}
+            onPress={() => {
+              setShowVideoViewerModal(false);
+              setViewerVideoUri(null);
+              setFullVideoRecord(null);
+            }}
+          >
+            <Text style={styles.videoViewerCloseButtonText}>✕</Text>
+          </TouchableOpacity>
+          {viewerVideoUri && (
+            <Video
+              style={styles.videoPlayer}
+              source={{ uri: viewerVideoUri }}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+            />
+          )}
+          {fullVideoRecord && (
+            <View style={styles.videoViewerInfo}>
+              <Text style={styles.videoViewerInfoLabel}>
+                Sensor: {fullVideoRecord.sensorValue ?? "--"}
+              </Text>
+              <Text style={styles.videoViewerInfoLabel}>
+                {new Date(fullVideoRecord.timestamp).toLocaleString("es-ES")}
+              </Text>
+              {fullVideoRecord.location && (
+                <Text style={styles.videoViewerInfoLabel}>
+                  {fullVideoRecord.location}
+                </Text>
+              )}
+            </View>
+          )}
         </View>
       </Modal>
     </View>
@@ -1431,6 +1851,14 @@ const styles = StyleSheet.create({
     zIndex: 20,
     elevation: 20,
   },
+  cameraVideoButtonContainer: {
+    position: "absolute",
+    bottom: 40,
+    alignSelf: "center",
+    alignItems: "center",
+    zIndex: 20,
+    elevation: 20,
+  },
   cameraSoundButtonContainer: {
     position: "absolute",
     bottom: 40,
@@ -1438,6 +1866,43 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 20,
     elevation: 20,
+  },
+  cameraVideoMicButtonContainer: {
+    position: "absolute",
+    bottom: 40,
+    right: 140,
+    alignItems: "center",
+    zIndex: 20,
+    elevation: 20,
+  },
+  cameraVideoRecordButtonContainer: {
+    position: "absolute",
+    bottom: 40,
+    right: 20,
+    alignItems: "center",
+    zIndex: 20,
+    elevation: 20,
+  },
+  videoRecordButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    backgroundColor: AppRed,
+    borderRadius: 8,
+    minWidth: 120,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  videoRecordButtonDisabled: {
+    backgroundColor: "#666",
+    opacity: 0.8,
+  },
+  videoStopButton: {
+    backgroundColor: "#c62828",
+  },
+  videoRecordButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
   },
   modalOverlay: {
     flex: 1,
@@ -1618,6 +2083,72 @@ const styles = StyleSheet.create({
   photoThumbnail: {
     width: 200,
     height: 200,
+  },
+  videoPreviewContainer: {
+    marginBottom: 24,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: AppRed,
+    overflow: "hidden",
+    backgroundColor: "#1a1a1a",
+  },
+  videoPreviewPlayer: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+  },
+  videoPreviewText: {
+    padding: 12,
+    fontSize: 14,
+    color: AppRed,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  galleryVideoThumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: "#1a1a1a",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  galleryVideoLabel: {
+    marginTop: 4,
+    fontSize: 10,
+    color: AppRed,
+  },
+  videoViewerContainer: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  videoViewerCloseButton: {
+    position: "absolute",
+    top: 50,
+    right: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: AppRed,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
+  },
+  videoViewerCloseButtonText: {
+    color: "#fff",
+    fontSize: 24,
+    fontWeight: "bold",
+  },
+  videoPlayer: {
+    flex: 1,
+    width: "100%",
+  },
+  videoViewerInfo: {
+    padding: 16,
+    backgroundColor: "#2d2d2d",
+  },
+  videoViewerInfoLabel: {
+    color: "#fff",
+    fontSize: 14,
+    marginBottom: 4,
   },
   sensorValueContainer: {
     width: "100%",
