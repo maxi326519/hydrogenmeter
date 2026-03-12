@@ -1,13 +1,13 @@
-import React from "react";
+import { CameraView as ExpoCameraView } from "expo-camera";
+import { ArrowUpIcon, ArrowDownIcon } from "./Icons";
+import { AppRed } from "../constants/Colors";
 import {
   View,
   StyleSheet,
   Text,
   Dimensions,
 } from "react-native";
-import { CameraView as ExpoCameraView } from "expo-camera";
-import { AppRed } from "../constants/Colors";
-import { ArrowUpIcon, ArrowDownIcon } from "./Icons";
+  import React from "react";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -23,6 +23,12 @@ interface VideoRecordingCameraViewProps {
   ppmDirection: "up" | "down" | null;
   isRecording?: boolean;
   recordedDuration?: number;
+  /** Fecha al iniciar grabación - se muestra en overlay y se actualiza durante la grabación */
+  recordingStartDate?: Date | null;
+  /** Linterna encendida/apagada (enableTorch de expo-camera) */
+  enableTorch?: boolean;
+  /** Si true, la cámara ya está montada en el padre (evita pantalla negra al alternar modos) */
+  cameraProvidedExternally?: boolean;
 }
 
 export const VideoRecordingCameraView: React.FC<VideoRecordingCameraViewProps> = ({
@@ -32,6 +38,9 @@ export const VideoRecordingCameraView: React.FC<VideoRecordingCameraViewProps> =
   ppmDirection,
   isRecording = false,
   recordedDuration = 0,
+  recordingStartDate = null,
+  enableTorch = false,
+  cameraProvidedExternally = false,
 }) => {
   if (!visible) {
     return null;
@@ -39,19 +48,21 @@ export const VideoRecordingCameraView: React.FC<VideoRecordingCameraViewProps> =
 
   return (
     <View style={styles.container}>
-      {/* Cámara - se captura correctamente con grabación de pantalla */}
-      <ExpoCameraView
-        ref={cameraRef}
-        style={styles.camera}
-        facing="back"
-        flash="off"
-        animateShutter={false}
-      />
+      {/* Cámara - omitida cuando ya está montada en MainPage (evita pantalla negra al alternar) */}
+      {!cameraProvidedExternally && (
+        <ExpoCameraView
+          ref={cameraRef}
+          style={styles.camera}
+          facing="back"
+          enableTorch={enableTorch}
+          animateShutter={false}
+        />
+      )}
 
-      {/* Overlay con datos del sensor - se grabará con la pantalla */}
+      {/* Overlay con datos del sensor - mismo layout que modo foto */}
       <View style={styles.overlay} pointerEvents="none">
-        {/* Barra de rango */}
-        <View style={styles.rangeBarContainer}>
+        {/* Barra de rango 0-10,000 (igual que foto) */}
+        <View style={styles.rangeBarContainerCamera}>
           <View style={styles.rangeBar}>
             <View
               style={[
@@ -66,45 +77,43 @@ export const VideoRecordingCameraView: React.FC<VideoRecordingCameraViewProps> =
             />
           </View>
         </View>
-        {/* Valor PPM */}
-        <View style={styles.ppmContainer}>
-          <Text style={styles.ppmValue}>
-            {gasPpm !== null ? gasPpm : "--"}
-          </Text>
-          {gasPpm !== null && ppmDirection === "up" && (
-            <View style={styles.ppmArrow}>
-              <ArrowUpIcon size={40} color={AppRed} />
-            </View>
-          )}
-          {gasPpm !== null && ppmDirection === "down" && (
-            <View style={styles.ppmArrow}>
-              <ArrowDownIcon size={40} color={AppRed} />
-            </View>
-          )}
+        {/* Número PPM (igual que foto) */}
+        <View style={styles.ppmTopContainer}>
+          <View style={styles.ppmContainer}>
+            <Text style={styles.ppmValue}>
+              {gasPpm !== null ? gasPpm : "--"}
+            </Text>
+            {gasPpm !== null && ppmDirection === "up" && (
+              <View style={styles.ppmArrow}>
+                <ArrowUpIcon size={40} color={AppRed} />
+              </View>
+            )}
+            {gasPpm !== null && ppmDirection === "down" && (
+              <View style={styles.ppmArrow}>
+                <ArrowDownIcon size={40} color={AppRed} />
+              </View>
+            )}
+          </View>
         </View>
-        {/* Marca de agua */}
+        {/* Marca de agua - fecha actual al grabar, se actualiza durante la grabación */}
         <View style={styles.watermark}>
           <Text style={styles.watermarkText}>Hydrogen Meter</Text>
           <Text style={styles.watermarkDate}>
-            {new Date().toLocaleDateString("es-ES", {
+            {(recordingStartDate
+              ? new Date(
+                  recordingStartDate.getTime() + (recordedDuration || 0) * 1000
+                )
+              : new Date()
+            ).toLocaleDateString("es-ES", {
               day: "2-digit",
               month: "2-digit",
               year: "numeric",
               hour: "2-digit",
               minute: "2-digit",
+              second: "2-digit",
             })}
           </Text>
         </View>
-        {/* Indicador de grabación */}
-        {isRecording && (
-          <View style={styles.recordingIndicator}>
-            <View style={styles.recordingDot} />
-            <Text style={styles.recordingText}>
-              Grabando... {recordedDuration.toFixed(1)}s
-            </Text>
-            <Text style={styles.recordingHint}>Toca Detener</Text>
-          </View>
-        )}
       </View>
     </View>
   );
@@ -131,16 +140,19 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.2)",
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    pointerEvents: "none",
   },
-  rangeBarContainer: {
+  rangeBarContainerCamera: {
     position: "absolute",
-    bottom: 200,
-    width: "80%",
-    maxWidth: 300,
+    bottom: 0,
     alignItems: "center",
+    paddingBottom: 300,
+    zIndex: 25,
+    elevation: 25,
+    width: "100%",
+    maxWidth: 300,
+    alignSelf: "center",
   },
   rangeBar: {
     width: "100%",
@@ -153,6 +165,16 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: AppRed,
     borderRadius: 8,
+  },
+  ppmTopContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 200,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    zIndex: 26,
+    elevation: 26,
   },
   ppmContainer: {
     flexDirection: "row",

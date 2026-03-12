@@ -1,5 +1,5 @@
 import { Platform, PermissionsAndroid } from "react-native";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { Base64 } from "js-base64";
 import {
   BleManager,
@@ -113,6 +113,8 @@ export const useBLE = () => {
     discoveredDevices,
     clearDiscoveredDevices,
     addDiscoveredDevice,
+    connectionStatusMessage,
+    setConnectionStatusMessage,
   } = useBLEStore();
 
   // Refs para sincronizar con el store y mantener compatibilidad
@@ -120,6 +122,7 @@ export const useBLE = () => {
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const connectedDeviceRef = useRef<Device | null>(null);
   const disconnectSubscriptionRef = useRef<any>(null);
+  const userInitiatedDisconnectRef = useRef<boolean>(false);
 
   // Sincronizar refs con el store
   const isConnectingRef = useRef<boolean>(false);
@@ -341,6 +344,7 @@ export const useBLE = () => {
 
     // Marcar que estamos conectando
     setIsConnecting(true);
+    setConnectionStatusMessage("cargando...");
 
     try {
       const isConnected = await device.isConnected();
@@ -349,6 +353,7 @@ export const useBLE = () => {
         try {
           await device.discoverAllServicesAndCharacteristics();
           // Si llegamos aqu?, el dispositivo est? realmente conectado y emparejado
+          setConnectionStatusMessage("conectando");
           addConsoleMessage("? Dispositivo ya estaba conectado");
           connectedDeviceRef.current = device;
           setConnectedDevice(device);
@@ -462,7 +467,8 @@ export const useBLE = () => {
       // Ahora s? marcar como conectado - el emparejamiento est? completo
       connectedDeviceRef.current = deviceConnection;
       setConnectedDevice(deviceConnection);
-      addConsoleMessage("? Conexi?n establecida");
+      setConnectionStatusMessage("conectando");
+      addConsoleMessage("✓ Conexi?n establecida");
 
       // Guardar el ID del dispositivo para futuras verificaciones
       setSavedDeviceId(deviceConnection.id);
@@ -510,7 +516,7 @@ export const useBLE = () => {
       startStreamingData(deviceConnection);
       setIsLoading(false);
       setAutoConnectFailed(false);
-      addConsoleMessage("? Conectado y listo para recibir datos");
+      addConsoleMessage("✓ Conectado y listo para recibir datos");
 
       // Marcar conexi?n exitosa
       setConnectionSuccess(true);
@@ -942,7 +948,10 @@ export const useBLE = () => {
     setConnectedDevice(null);
     setIsLoading(false);
     setAutoConnectFailed(true);
-    setShowDisconnectAlert(true);
+    if (!userInitiatedDisconnectRef.current) {
+      setShowDisconnectAlert(true);
+    }
+    userInitiatedDisconnectRef.current = false;
 
     // Limpiar hc06Device para evitar reconexi�n autom�tica inmediata
     setHc06Device(null);
@@ -965,6 +974,19 @@ export const useBLE = () => {
     bleManager.stopDeviceScan();
     setIsScanning(false);
   };
+
+  const disconnect = useCallback(async () => {
+    const device = connectedDeviceRef.current;
+    if (!device) return;
+    userInitiatedDisconnectRef.current = true;
+    try {
+      await device.cancelConnection();
+    } catch (error) {
+      console.log("Error al desconectar:", error);
+      userInitiatedDisconnectRef.current = false;
+      handleDisconnection();
+    }
+  }, []);
 
   // Efecto: al montar, pedir permisos y comprobar si ya hay un dispositivo conectado
   useEffect(() => {
@@ -998,6 +1020,7 @@ export const useBLE = () => {
     isLoading,
     isScanning: isScanningState,
     autoConnectFailed,
+    connectionStatusMessage,
     consoleData,
     gasPpm,
     bateria,
@@ -1012,6 +1035,7 @@ export const useBLE = () => {
     stopScan,
     discoveredDevices,
     connectToDevice,
+    disconnect,
     ignoreDisconnectionRef: {
       current: ignoreDisconnectionState,
       set: setIgnoreDisconnection,

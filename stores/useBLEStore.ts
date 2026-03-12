@@ -20,6 +20,8 @@ interface BLEState {
   deviceReady: boolean;
   /** Lista de dispositivos descubiertos al escanear (para el modal de selección) */
   discoveredDevices: Device[];
+  /** Mensaje de estado durante conexión: "cargando..." o "conectando" */
+  connectionStatusMessage: string;
 
   // Estados internos (para refs)
   isConnecting: boolean;
@@ -50,6 +52,7 @@ interface BLEState {
   setDiscoveredDevices: (devices: Device[]) => void;
   addDiscoveredDevice: (device: Device) => void;
   clearDiscoveredDevices: () => void;
+  setConnectionStatusMessage: (message: string) => void;
 }
 
 export const useBLEStore = create<BLEState>((set) => ({
@@ -66,6 +69,7 @@ export const useBLEStore = create<BLEState>((set) => ({
   calibratingProgress: 0,
   deviceReady: false,
   discoveredDevices: [],
+  connectionStatusMessage: "",
   isConnecting: false,
   connectionSuccess: false,
   isScanning: false,
@@ -113,4 +117,6 @@ export const useBLEStore = create<BLEState>((set) => ({
       };
     }),
   clearDiscoveredDevices: () => set({ discoveredDevices: [] }),
+  setConnectionStatusMessage: (message) =>
+    set({ connectionStatusMessage: message }),
 }));

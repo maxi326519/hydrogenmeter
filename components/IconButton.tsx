@@ -1,10 +1,10 @@
+import { TouchableOpacity, StyleSheet, StyleProp, ViewStyle } from 'react-native';
 import React from 'react';
-import { TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
 
 interface IconButtonProps {
   icon: React.ReactNode;
   onPress: () => void;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   size?: number;
   disabled?: boolean;
 }

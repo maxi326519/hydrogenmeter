@@ -3,13 +3,27 @@ import { usePhotoStorage, PhotoRecord } from "../hooks/usePhotoStorage";
 import { useVideoStorage, VideoRecord } from "../hooks/useVideoStorage";
 import { MOCK_BLE_ENABLED } from "@/constants/mockBLE";
 import { useBLEOrMock } from "../hooks/useBLEOrMock";
-import { ConsoleEntry } from "../hooks/useBLE";
+import { VideoSection } from "./VideoSection";
 import { captureRef } from "react-native-view-shot";
-import { IconButton } from "./IconButton";
 import { CameraView } from "./CameraView";
-import { VideoRecordingCameraView } from "./VideoRecordingCameraView";
 import { AppRed } from "../constants/Colors";
-import { Audio, Video, ResizeMode } from "expo-av";
+import { Audio } from "expo-av";
+import {
+  PrincipalesBar,
+  CameraBar,
+  CameraCaptureButton,
+} from "./modules";
+import {
+  ConsoleLogModal,
+  GalleryModal,
+  ImageViewerModal,
+  FullImageModal,
+  FullVideoModal,
+  VideoViewerModal,
+  CameraPermissionModal,
+  DeviceConnectModal,
+  PhotoFormModal,
+} from "./modals";
 import {
   useCameraPermissions,
   CameraView as ExpoCameraView,
@@ -17,38 +31,23 @@ import {
 import {
   Text,
   View,
-  Modal,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
   Alert,
   Animated,
-  Linking,
   Image,
   Dimensions,
   ActivityIndicator,
 } from "react-native";
 import {
-  WifiOffIcon,
-  WifiOnIcon,
-  CameraIcon,
-  VideoIcon,
-  FolderIcon,
-  SoundMaxIcon,
-  SoundMuteIcon,
   Battery10Icon,
   Battery25Icon,
   Battery50Icon,
   Battery75Icon,
   Battery100Icon,
-  SettingsIcon,
   ArrowUpIcon,
   ArrowDownIcon,
-  ArrowBackIcon,
 } from "./Icons";
-
-import TextInput from "./Inputs/TextInput";
-import RecordScreen from "react-native-record-screen";
 
 export default function MainPage() {
   const {
@@ -71,6 +70,8 @@ export default function MainPage() {
     discoveredDevices,
     connectToDevice,
     isScanning,
+    disconnect,
+    connectionStatusMessage,
   } = useBLEOrMock();
 
   // Barra unificada: 0–50% = preheat, 50–100% = calibración (siempre "Calibrando")
@@ -82,6 +83,7 @@ export default function MainPage() {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraMode, setCameraMode] = useState<"photo" | "video">("photo");
   const [alarmEnabled, setAlarmEnabled] = useState(false);
+  const [flashEnabled, setFlashEnabled] = useState(false);
   const [ppmDirection, setPpmDirection] = useState<"up" | "down" | null>(null);
   const previousPpmRef = useRef<number | null>(null);
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -96,11 +98,9 @@ export default function MainPage() {
   );
   const [showFullImageViewer, setShowFullImageViewer] = useState(false);
   const [viewerImageUri, setViewerImageUri] = useState<string | null>(null);
+  const [showFullVideoModal, setShowFullVideoModal] = useState(false);
   const [showVideoViewerModal, setShowVideoViewerModal] = useState(false);
-  const [viewerVideoUri, setViewerVideoUri] = useState<string | null>(null);
   const [fullVideoRecord, setFullVideoRecord] = useState<VideoRecord | null>(null);
-  const [isEditingLocation, setIsEditingLocation] = useState(false);
-  const [editingLocation, setEditingLocation] = useState<string>("");
   const [photoSensorValue, setPhotoSensorValue] = useState<number | null>(null);
   const [photoLocation, setPhotoLocation] = useState<string>("");
   const [tempPhotoUri, setTempPhotoUri] = useState<string | null>(null);
@@ -108,14 +108,6 @@ export default function MainPage() {
   const [isProcessingPhoto, setIsProcessingPhoto] = useState<boolean>(false);
   const cameraRef = useRef<ExpoCameraView>(null);
   const photoWithOverlayRef = useRef<View>(null);
-  const [isVideoRecording, setIsVideoRecording] = useState(false);
-  const [videoRecordingDuration, setVideoRecordingDuration] = useState(0);
-  const [videoMicEnabled, setVideoMicEnabled] = useState(true);
-  const videoRecordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [capturedVideoUri, setCapturedVideoUri] = useState<string | null>(null);
-  const [videoSensorValue, setVideoSensorValue] = useState<number | null>(null);
-  const [videoLocation, setVideoLocation] = useState<string>("");
-  const [showVideoFormModal, setShowVideoFormModal] = useState(false);
   const {
     createRecord,
     records,
@@ -128,17 +120,8 @@ export default function MainPage() {
     createRecord: createVideoRecord,
     loadRecords: loadVideoRecords,
     deleteRecord: deleteVideoRecord,
+    updateRecord: updateVideoRecord,
   } = useVideoStorage();
-
-  // Limpiar intervalo de grabación al desmontar o cambiar de modo
-  useEffect(() => {
-    return () => {
-      if (videoRecordingIntervalRef.current) {
-        clearInterval(videoRecordingIntervalRef.current);
-        videoRecordingIntervalRef.current = null;
-      }
-    };
-  }, []);
 
   // Ref para el sonido del pitido (cargado una vez)
   const beepSoundRef = useRef<Audio.Sound | null>(null);
@@ -186,8 +169,8 @@ export default function MainPage() {
           setPpmDirection(null);
         }
 
-        // Reproducir pitido si la alarma está activada
-        if (alarmEnabled) {
+        // Reproducir pitido cuando la medición incrementa o está por encima de 10.000 ppm
+        if (alarmEnabled && (gasPpm > previousValue || gasPpm > 10000)) {
           playBeep();
         }
       }
@@ -273,96 +256,9 @@ export default function MainPage() {
     }
   };
 
-  const handleVideoRecordingComplete = useCallback(
-    (videoUri: string) => {
-      setCapturedVideoUri(videoUri);
-      setVideoSensorValue(gasPpm);
-      setShowCamera(false);
-      setCameraMode("photo");
-      setShowVideoFormModal(true);
-    },
-    [gasPpm]
-  );
-
-  const handleStartVideoRecording = useCallback(async () => {
-    if (isVideoRecording) return;
-    try {
-      const result = await RecordScreen.startRecording({ mic: videoMicEnabled });
-      if (result === "permission_error") {
-        Alert.alert(
-          "Permiso denegado",
-          "Se necesita permiso para grabar la pantalla."
-        );
-        return;
-      }
-      setIsVideoRecording(true);
-      setVideoRecordingDuration(0);
-      videoRecordingIntervalRef.current = setInterval(() => {
-        setVideoRecordingDuration((d) => d + 0.1);
-      }, 100);
-    } catch (error) {
-      console.error("Error iniciando grabación:", error);
-      Alert.alert(
-        "Error",
-        `No se pudo iniciar la grabación: ${(error as Error).message}`
-      );
-    }
-  }, [isVideoRecording]);
-
-  const handleStopVideoRecording = useCallback(async () => {
-    if (!isVideoRecording) return;
-    try {
-      if (videoRecordingIntervalRef.current) {
-        clearInterval(videoRecordingIntervalRef.current);
-        videoRecordingIntervalRef.current = null;
-      }
-      setIsVideoRecording(false);
-      const result = await RecordScreen.stopRecording();
-      if (result && result.status === "success" && result.result?.outputURL) {
-        let videoUri = result.result.outputURL;
-        // Asegurar formato URI para FileSystem (expo usa file://)
-        if (!videoUri.startsWith("file://") && !videoUri.startsWith("content://")) {
-          videoUri = `file://${videoUri}`;
-        }
-        handleVideoRecordingComplete(videoUri);
-      } else {
-        Alert.alert("Error", "No se pudo guardar el video grabado.");
-      }
-    } catch (error) {
-      setIsVideoRecording(false);
-      console.error("Error deteniendo grabación:", error);
-      Alert.alert(
-        "Error",
-        `No se pudo detener la grabación: ${(error as Error).message}`
-      );
-    }
-  }, [isVideoRecording, handleVideoRecordingComplete]);
-
-  const handleSaveVideo = async () => {
-    if (!capturedVideoUri) {
-      Alert.alert("Error", "No hay video para guardar");
-      return;
-    }
-    try {
-      await createVideoRecord(
-        capturedVideoUri,
-        videoSensorValue,
-        videoLocation || undefined
-      );
-      Alert.alert("Éxito", "Video guardado correctamente");
-      setShowVideoFormModal(false);
-      setCapturedVideoUri(null);
-      setVideoSensorValue(null);
-      setVideoLocation("");
-    } catch (error) {
-      console.error("Error guardando video:", error);
-      Alert.alert("Error", "No se pudo guardar el video. Intenta nuevamente.");
-    }
-  };
-
   // Función para abrir cámara en modo video (desde botón Video en barra principal)
   const handleVideoPress = async () => {
-    if (!connectedDevice) return;
+    if (!connectedDevice || !deviceReady) return;
 
     if (!cameraPermission) return;
 
@@ -380,8 +276,8 @@ export default function MainPage() {
 
   // Función para manejar el botón de cámara (toggle)
   const handleCameraPress = async () => {
-    // Solo funciona si el equipo está conectado
-    if (!connectedDevice) {
+    // Solo funciona si el equipo está conectado y calibrado
+    if (!connectedDevice || !deviceReady) {
       return;
     }
 
@@ -545,42 +441,6 @@ export default function MainPage() {
     }
   };
 
-  // Función para iniciar edición de ubicación
-  const handleStartEditLocation = () => {
-    if (fullImageRecord) {
-      setEditingLocation(fullImageRecord.location || "");
-      setIsEditingLocation(true);
-    }
-  };
-
-  // Función para guardar cambios de ubicación
-  const handleSaveLocation = async () => {
-    if (!fullImageRecord) return;
-
-    try {
-      const updatedRecord = await updateRecord(fullImageRecord.id, {
-        location: editingLocation || undefined,
-      });
-      if (updatedRecord) {
-        setFullImageRecord(updatedRecord);
-        setIsEditingLocation(false);
-        Alert.alert("Éxito", "Ubicación actualizada correctamente");
-      }
-    } catch (error) {
-      console.error("Error actualizando ubicación:", error);
-      Alert.alert(
-        "Error",
-        "No se pudo actualizar la ubicación. Intenta nuevamente.",
-      );
-    }
-  };
-
-  // Función para cancelar edición
-  const handleCancelEditLocation = () => {
-    setIsEditingLocation(false);
-    setEditingLocation("");
-  };
-
   return (
     <View
       style={[
@@ -622,11 +482,13 @@ export default function MainPage() {
               }
             }}
           />
+
           {/* "Hydrogen Meter" arriba a la izquierda */}
           <View style={styles.overlayTopLeft}>
             <Text style={styles.overlayTextTop}>Hydrogen Meter</Text>
           </View>
-          {/* Número del sensor abajo centrado (3er cuadrante) - usa la medición almacenada al tomar la foto */}
+
+          {/* Número del sensor abajo centrado usa la medición almacenada al tomar la foto */}
           <View style={styles.overlayBottomCenter}>
             <Text
               style={styles.overlayTextCenter}
@@ -636,6 +498,7 @@ export default function MainPage() {
               {photoSensorValue !== null ? photoSensorValue : "--"}
             </Text>
           </View>
+
           {/* Fecha abajo a la derecha */}
           <View style={styles.overlayBottomRight}>
             <Text style={styles.overlayTextBottom}>
@@ -649,30 +512,39 @@ export default function MainPage() {
         </View>
       )}
 
-      {/* Cámara de fondo cuando tiene permisos */}
+      {/* Cámara de fondo cuando tiene permisos - siempre montada para evitar fondo negro al alternar modos */}
       {showCamera && cameraPermission?.granted && (
-        <>
-          {cameraMode === "photo" ? (
-            <CameraView
-              visible={showCamera}
-              onClose={() => {
-                setShowCamera(false);
-                setCameraMode("photo");
-              }}
-              cameraRef={cameraRef}
-            />
-          ) : (
-            <VideoRecordingCameraView
-              visible={showCamera}
-              cameraRef={cameraRef}
-              gasPpm={gasPpm}
-              ppmDirection={ppmDirection}
-              isRecording={isVideoRecording}
-              recordedDuration={videoRecordingDuration}
-            />
-          )}
-        </>
+        <CameraView
+          visible={showCamera}
+          onClose={() => {
+            setShowCamera(false);
+            setCameraMode("photo");
+          }}
+          cameraRef={cameraRef}
+          enableTorch={flashEnabled}
+        />
       )}
+
+      {/* VideoSection: modo video */}
+      <VideoSection
+        visible={showCamera && !!cameraPermission?.granted && cameraMode === "video"}
+        cameraRef={cameraRef}
+        gasPpm={gasPpm}
+        ppmDirection={ppmDirection}
+        onSwitchToPhoto={() => {
+          setShowCamera(false);
+          setCameraMode("photo");
+        }}
+        onSwitchToPhotoMode={() => setCameraMode("photo")}
+        createVideoRecord={createVideoRecord}
+        alarmEnabled={alarmEnabled}
+        onAudioPress={() => {
+          setAlarmEnabled(!alarmEnabled);
+          console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
+        }}
+        flashEnabled={flashEnabled}
+        onFlashPress={() => setFlashEnabled(!flashEnabled)}
+      />
 
       {/* Batería arriba a la derecha - nivel real cuando hay dato (equipo enviando) */}
       <View style={styles.batteryContainer}>
@@ -683,155 +555,71 @@ export default function MainPage() {
         )}
       </View>
 
-      {/* Botones: modo cámara (volver + sonido + foto/video) o modo normal (todos) */}
+      {/* Botones: modo cámara (CameraBar) o modo normal (PrincipalesBar) */}
       {showCamera && cameraPermission?.granted ? (
         cameraMode === "photo" ? (
-          <>
-            {/* Botón volver - izquierda */}
-            <View style={styles.cameraBackButtonContainer}>
-              <IconButton
-                icon={<ArrowBackIcon size={28} color={AppRed} />}
-                onPress={() => {
-                  setShowCamera(false);
-                  setCameraMode("photo");
-                }}
+          <CameraBar
+            mode="photo"
+            onBack={() => {
+              setShowCamera(false);
+              setCameraMode("photo");
+            }}
+            alarmEnabled={alarmEnabled}
+            onAudioPress={() => {
+              setAlarmEnabled(!alarmEnabled);
+              console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
+            }}
+            flashEnabled={flashEnabled}
+            onFlashPress={() => setFlashEnabled(!flashEnabled)}
+            onSwitchToVideoMode={() => setCameraMode("video")}
+            isProcessing={isProcessingPhoto}
+            captureButton={
+              <CameraCaptureButton
+                onPress={handleTakePicture}
+                disabled={isProcessingPhoto}
+                isProcessing={isProcessingPhoto}
               />
-            </View>
-            {/* Botón video - centro derecho: cambiar a modo video */}
-            <View style={styles.cameraVideoButtonContainer}>
-              <IconButton
-                icon={<VideoIcon size={28} color={AppRed} />}
-                onPress={() => setCameraMode("video")}
-              />
-            </View>
-            {/* Botón sonido - derecha */}
-            <View style={styles.cameraSoundButtonContainer}>
-              <IconButton
-                icon={
-                  alarmEnabled ? (
-                    <SoundMaxIcon size={28} color={AppRed} />
-                  ) : (
-                    <SoundMuteIcon size={28} color={AppRed} />
-                  )
-                }
-                onPress={() => {
-                  setAlarmEnabled(!alarmEnabled);
-                  console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
-                }}
-              />
-            </View>
-          </>
-        ) : (
-          /* Modo video: Volver, Micrófono, Grabar */
-          <>
-            <View style={styles.cameraBackButtonContainer}>
-              <IconButton
-                icon={<ArrowBackIcon size={28} color={AppRed} />}
-                onPress={() => {
-                  setShowCamera(false);
-                  setCameraMode("photo");
-                }}
-                disabled={isVideoRecording}
-              />
-            </View>
-            {!isVideoRecording && (
-              <View style={styles.cameraVideoMicButtonContainer}>
-                <IconButton
-                  icon={
-                    videoMicEnabled ? (
-                      <SoundMaxIcon size={28} color={AppRed} />
-                    ) : (
-                      <SoundMuteIcon size={28} color={AppRed} />
-                    )
-                  }
-                  onPress={() => setVideoMicEnabled(!videoMicEnabled)}
-                />
-              </View>
-            )}
-            <View style={styles.cameraVideoRecordButtonContainer}>
-              {isVideoRecording ? (
-                <TouchableOpacity
-                  style={[styles.videoRecordButton, styles.videoStopButton]}
-                  onPress={handleStopVideoRecording}
-                >
-                  <Text style={styles.videoRecordButtonText}>Detener</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  style={styles.videoRecordButton}
-                  onPress={handleStartVideoRecording}
-                >
-                  <Text style={styles.videoRecordButtonText}>Grabar</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </>
-        )
+            }
+          />
+        ) : null
       ) : (
-        <>
-          {/* Botón de log abajo a la izquierda */}
-          <View style={styles.logButtonContainer}>
-            <IconButton
-              icon={<SettingsIcon size={28} color={AppRed} />}
-              onPress={() => setShowLogModal(true)}
-            />
-          </View>
-
-          {/* Botones de iconos abajo a la derecha */}
-          <View style={styles.iconButtonsContainer}>
-            <IconButton
-              icon={
-                connectedDevice ? (
-                  <WifiOnIcon size={28} color={AppRed} />
-                ) : (
-                  <WifiOffIcon size={28} color={AppRed} />
-                )
-              }
-              onPress={() => {
-                if (!connectedDevice) {
-                  setShowConnectModal(true);
-                  startDiscoveryScan();
-                }
-                console.log(
-                  "WiFi presionado - Estado:",
-                  connectedDevice ? "Conectado" : "Desconectado",
-                );
-              }}
-            />
-            <IconButton
-              icon={<CameraIcon size={28} color={AppRed} />}
-              onPress={handleCameraPress}
-              disabled={!connectedDevice}
-            />
-            <IconButton
-              icon={<VideoIcon size={28} color={AppRed} />}
-              onPress={handleVideoPress}
-              disabled={!connectedDevice}
-            />
-            <IconButton
-              icon={<FolderIcon size={28} color={AppRed} />}
-              onPress={async () => {
-                await loadRecords();
-                await loadVideoRecords();
-                setShowGalleryModal(true);
-              }}
-            />
-            <IconButton
-              icon={
-                alarmEnabled ? (
-                  <SoundMaxIcon size={28} color={AppRed} />
-                ) : (
-                  <SoundMuteIcon size={28} color={AppRed} />
-                )
-              }
-              onPress={() => {
-                setAlarmEnabled(!alarmEnabled);
-                console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
-              }}
-              disabled={!connectedDevice}
-            />
-          </View>
-        </>
+        <PrincipalesBar
+          connectedDevice={!!connectedDevice}
+          alarmEnabled={alarmEnabled}
+          onWifiPress={() => {
+            if (!connectedDevice) {
+              setShowConnectModal(true);
+              startDiscoveryScan();
+            } else {
+              Alert.alert(
+                "Desconectar",
+                "¿Desconectar el dispositivo?",
+                [
+                  { text: "Cancelar", style: "cancel" },
+                  {
+                    text: "Desconectar",
+                    style: "destructive",
+                    onPress: () => disconnect(),
+                  },
+                ]
+              );
+            }
+          }}
+          onCameraPress={handleCameraPress}
+          onVideoPress={handleVideoPress}
+          onFilesPress={async () => {
+            await loadRecords();
+            await loadVideoRecords();
+            setShowGalleryModal(true);
+          }}
+          onAudioPress={() => {
+            setAlarmEnabled(!alarmEnabled);
+            console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
+          }}
+          onConfigPress={() => setShowLogModal(true)}
+          disabled={!connectedDevice || !deviceReady}
+          showConfig={__DEV__}
+        />
       )}
 
       {/* Contenido central que cambia según el estado */}
@@ -874,28 +662,18 @@ export default function MainPage() {
           </View>
         </View>
       ) : showCamera && cameraMode === "video" ? (
-        /* Modo video: no mostrar barra/ppm de MainPage (VideoRecordingCameraView tiene el suyo) */
+        /* Modo video: no mostrar barra/ppm de MainPage (VideoSection tiene el suyo) */
         null
       ) : !connectedDevice ? (
-        // Estado: No conectado - solo mostrar si la cámara no está activa
+        // Estado: No conectado - mostrar loading al conectar o botón conectar
         <>
-          {isLoading && !autoConnectFailed ? (
-            // Buscando automáticamente
+          {isLoading ? (
+            // Conectando: loading y mensaje (oculta botón Conectar)
             <View style={styles.centerContent}>
-              <View style={styles.progressBarContainer}>
-                <Animated.View
-                  style={[
-                    styles.progressBar,
-                    {
-                      width: progressAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ["0%", "100%"],
-                      }),
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={styles.loadingText}>Conectando</Text>
+              <ActivityIndicator size="large" color={AppRed} />
+              <Text style={styles.loadingText}>
+                {connectionStatusMessage || "Conectando"}
+              </Text>
             </View>
           ) : autoConnectFailed ? (
             // No encontrado - mostrar botón conectar
@@ -965,23 +743,6 @@ export default function MainPage() {
         </View>
       )}
 
-      {/* Botón de captura - por encima de todo (solo en modo foto) */}
-      {showCamera && cameraPermission?.granted && cameraMode === "photo" && (
-        <View style={styles.captureButtonContainer}>
-          <TouchableOpacity
-            style={styles.captureButton}
-            onPress={handleTakePicture}
-            disabled={isProcessingPhoto}
-          >
-            {isProcessingPhoto ? (
-              <ActivityIndicator size="large" color="#fff" />
-            ) : (
-              <View style={styles.captureButtonInner} />
-            )}
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* Loading overlay mientras se procesa la foto */}
       {isProcessingPhoto && (
         <View style={styles.photoProcessingOverlay}>
@@ -992,736 +753,128 @@ export default function MainPage() {
         </View>
       )}
 
-      {/* Modal de permisos de cámara - solo cuando no tiene permisos */}
-      <Modal
+      <CameraPermissionModal
         visible={showCamera && !cameraPermission?.granted}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowCamera(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Permiso de Cámara Requerido</Text>
-            </View>
-            <View style={styles.modalBody}>
-              <Text style={styles.modalText}>
-                Esta aplicación necesita acceso a la cámara para capturar
-                imágenes.
-              </Text>
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={async () => {
-                  const result = await requestCameraPermission();
-                  if (!result.granted) {
-                    Alert.alert(
-                      "Permiso Denegado",
-                      "Para usar la cámara, necesitas otorgar permisos en la configuración de la aplicación.",
-                      [
-                        {
-                          text: "Cancelar",
-                          style: "cancel",
-                          onPress: () => setShowCamera(false),
-                        },
-                        {
-                          text: "Abrir Configuración",
-                          onPress: () => Linking.openSettings(),
-                        },
-                      ],
-                    );
-                  } else {
-                    setShowCamera(true);
-                  }
-                }}
-              >
-                <Text style={styles.modalButtonText}>Solicitar Permiso</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalButtonSecondary}
-                onPress={() => setShowCamera(false)}
-              >
-                <Text style={styles.modalButtonSecondaryText}>Cerrar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowCamera(false)}
+        onRequestPermission={requestCameraPermission}
+        onPermissionGranted={() => setShowCamera(true)}
+      />
 
-      {/* Modal de logs */}
-      <Modal
-        visible={showLogModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowLogModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Consola de dispositivo</Text>
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={clearConsole}
-                >
-                  <Text style={styles.modalButtonText}>Limpiar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => setShowLogModal(false)}
-                >
-                  <Text style={styles.modalButtonText}>Cerrar</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            <ScrollView style={styles.modalScrollView}>
-              {consoleData.length === 0 ? (
-                <Text style={styles.modalEmptyText}>
-                  Esperando datos del dispositivo...
-                </Text>
-              ) : (
-                consoleData.map((entry: ConsoleEntry) => (
-                  <View key={entry.id} style={styles.logLine}>
-                    <Text style={styles.logTimestamp}>[{entry.timestamp}]</Text>
-                    <Text style={styles.logData}>{entry.data}</Text>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-            <View style={styles.modalFooter}>
-              <Text style={styles.modalFooterText}>
-                {consoleData.length} mensaje
-                {consoleData.length !== 1 ? "s" : ""} recibido
-                {consoleData.length !== 1 ? "s" : ""}
-              </Text>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {__DEV__ && (
+        <ConsoleLogModal
+          visible={showLogModal}
+          onClose={() => setShowLogModal(false)}
+          consoleData={consoleData}
+          onClear={clearConsole}
+        />
+      )}
 
-      {/* Modal de selección de dispositivos BLE */}
-      <Modal
+      <DeviceConnectModal
         visible={showConnectModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
+        onClose={() => {
           stopScan();
           setShowConnectModal(false);
         }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Seleccionar dispositivo</Text>
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  stopScan();
-                  setShowConnectModal(false);
-                }}
-              >
-                <Text style={styles.modalButtonText}>Cerrar</Text>
-              </TouchableOpacity>
-            </View>
-            {isScanning && discoveredDevices.length === 0 ? (
-              <View style={styles.modalBody}>
-                <ActivityIndicator size="large" color={AppRed} />
-                <Text style={[styles.modalText, { marginTop: 16 }]}>
-                  Buscando dispositivos...
-                </Text>
-              </View>
-            ) : null}
-            <View style={styles.modalScrollViewContainer}>
-              <ScrollView
-                style={styles.modalScrollView}
-                contentContainerStyle={
-                  discoveredDevices.length === 0 && !isScanning
-                    ? styles.modalScrollViewContentEmpty
-                    : undefined
-                }
-                showsVerticalScrollIndicator={true}
-              >
-                {discoveredDevices.length === 0 && !isScanning ? (
-                  <Text style={styles.modalEmptyText}>
-                    No se encontraron dispositivos. Asegúrate de que el
-                    Bluetooth esté encendido y el dispositivo cerca. {MOCK_BLE_ENABLED ? " (usando mock)" : ""}
-                  </Text>
-                ) : (
-                  discoveredDevices.map((device) => (
-                    <TouchableOpacity
-                      key={device.id}
-                      style={styles.deviceItem}
-                      onPress={() => {
-                        stopScan();
-                        setShowConnectModal(false);
-                        connectToDevice(device);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.deviceItemName} numberOfLines={1}>
-                        {device.name ||
-                          device.localName ||
-                          "Dispositivo sin nombre"}
-                      </Text>
-                      <Text style={styles.deviceItemId} numberOfLines={1}>
-                        {device.id}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </ScrollView>
-            </View>
-            <View style={styles.modalFooter}>
-              <Text style={styles.modalFooterText}>
-                {discoveredDevices.length} dispositivo
-                {discoveredDevices.length !== 1 ? "s" : ""} encontrado
-                {discoveredDevices.length !== 1 ? "s" : ""}
-                {isScanning ? " · Buscando..." : ""}
-              </Text>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        devices={discoveredDevices}
+        isScanning={isScanning}
+        onSelectDevice={(device) => {
+          stopScan();
+          setShowConnectModal(false);
+          connectToDevice(device);
+        }}
+        mockEnabled={MOCK_BLE_ENABLED}
+      />
 
-      {/* Modal de formulario de video */}
-      <Modal
-        visible={showVideoFormModal}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setShowVideoFormModal(false)}
-      >
-        <View style={styles.photoFormModalContainer}>
-          <View style={styles.photoFormModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Nuevo Video</Text>
-              <TouchableOpacity
-                style={styles.modalCloseButton}
-                onPress={() => {
-                  setShowVideoFormModal(false);
-                  setCapturedVideoUri(null);
-                  setVideoSensorValue(null);
-                  setVideoLocation("");
-                }}
-              >
-                <Text style={styles.modalCloseButtonText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalScrollView}>
-              <View style={styles.photoFormContainer}>
-                {/* Reproducir video grabado */}
-                {capturedVideoUri && (
-                  <View style={styles.videoPreviewContainer}>
-                    <Video
-                      style={styles.videoPreviewPlayer}
-                      source={{ uri: capturedVideoUri }}
-                      useNativeControls
-                      resizeMode={ResizeMode.CONTAIN}
-                      shouldPlay={false}
-                    />
-                    <Text style={styles.videoPreviewText}>Vista previa del video</Text>
-                  </View>
-                )}
-
-                {/* Valor del sensor */}
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    name="sensorValue"
-                    label="Valor del Sensor"
-                    value={
-                      videoSensorValue !== null
-                        ? videoSensorValue.toString()
-                        : ""
-                    }
-                    onChange={(name, value) => {
-                      const numValue = parseInt(value) || null;
-                      setVideoSensorValue(numValue);
-                    }}
-                    placeholder="Ingrese el valor del sensor"
-                    disabled={true}
-                    style={styles.darkInput}
-                  />
-                </View>
-
-                {/* Ubicación */}
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    name="location"
-                    label="Ubicación"
-                    value={videoLocation}
-                    onChange={(name, value) => setVideoLocation(value)}
-                    placeholder="Ingrese la ubicación donde se grabó el video"
-                    style={styles.darkInput}
-                  />
-                </View>
-
-                {/* Botón de guardar */}
-                <TouchableOpacity
-                  style={styles.saveButton}
-                  onPress={handleSaveVideo}
-                >
-                  <Text style={styles.saveButtonText}>Guardar</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal de formulario de foto */}
-      <Modal
+      <PhotoFormModal
         visible={showPhotoFormModal}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setShowPhotoFormModal(false)}
-      >
-        <View style={styles.photoFormModalContainer}>
-          <View style={styles.photoFormModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Nueva Foto</Text>
-              <TouchableOpacity
-                style={styles.modalCloseButton}
-                onPress={() => {
-                  setShowPhotoFormModal(false);
-                  setCapturedPhoto(null);
-                  setPhotoSensorValue(null);
-                  setPhotoLocation("");
-                }}
-              >
-                <Text style={styles.modalCloseButtonText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalScrollView}>
-              <View style={styles.photoFormContainer}>
-                {/* Miniatura de la foto */}
-                {capturedPhoto && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setViewerImageUri(capturedPhoto);
-                      setShowFullImageViewer(true);
-                    }}
-                    style={styles.photoThumbnailContainer}
-                  >
-                    <Image
-                      source={{ uri: capturedPhoto }}
-                      style={styles.photoThumbnail}
-                    />
-                  </TouchableOpacity>
-                )}
+        onClose={() => {
+          setShowPhotoFormModal(false);
+          setCapturedPhoto(null);
+          setPhotoSensorValue(null);
+          setPhotoLocation("");
+        }}
+        imageUri={capturedPhoto}
+        sensorValue={photoSensorValue}
+        location={photoLocation}
+        onSensorValueChange={setPhotoSensorValue}
+        onLocationChange={setPhotoLocation}
+        onSave={handleSavePhoto}
+        onOpenImageViewer={(uri) => {
+          setViewerImageUri(uri);
+          setShowFullImageViewer(true);
+        }}
+      />
 
-                {/* Valor del sensor */}
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    name="sensorValue"
-                    label="Valor del Sensor"
-                    value={
-                      photoSensorValue !== null
-                        ? photoSensorValue.toString()
-                        : ""
-                    }
-                    onChange={(name, value) => {
-                      const numValue = parseInt(value) || null;
-                      setPhotoSensorValue(numValue);
-                    }}
-                    placeholder="Ingrese el valor del sensor"
-                    disabled={true}
-                    style={styles.darkInput}
-                  />
-                </View>
+      <GalleryModal
+        visible={showGalleryModal}
+        onClose={() => setShowGalleryModal(false)}
+        records={records}
+        videoRecords={videoRecords}
+        onPhotoPress={(record) => {
+          setFullImageUri(record.imageUri);
+          setFullImageRecord(record);
+          setShowGalleryModal(false);
+          setShowFullImageModal(true);
+        }}
+        onVideoPress={(record) => {
+          setFullVideoRecord(record);
+          setShowGalleryModal(false);
+          setShowFullVideoModal(true);
+        }}
+        onDeletePhoto={async (id) => {
+          await deleteRecord(id);
+        }}
+        onDeleteVideo={async (id) => {
+          await deleteVideoRecord(id);
+        }}
+      />
 
-                {/* Ubicación */}
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    name="location"
-                    label="Ubicación"
-                    value={photoLocation}
-                    onChange={(name, value) => setPhotoLocation(value)}
-                    placeholder="Ingrese la ubicación donde se tomó la foto"
-                    style={styles.darkInput}
-                  />
-                </View>
-
-                {/* Botón de guardar */}
-                <TouchableOpacity
-                  style={styles.saveButton}
-                  onPress={handleSavePhoto}
-                >
-                  <Text style={styles.saveButtonText}>Guardar</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal de imagen completa */}
-      <Modal
+      <FullImageModal
         visible={showFullImageModal}
-        animationType="fade"
-        transparent={false}
-        onRequestClose={() => {
+        onClose={() => {
           setShowFullImageModal(false);
           setFullImageUri(null);
           setFullImageRecord(null);
         }}
-      >
-        <View style={styles.fullImageModalContainer}>
-          <View style={styles.fullImageModalHeader}>
-            <TouchableOpacity
-              style={styles.fullImageCloseButton}
-              onPress={() => {
-                setShowFullImageModal(false);
-                setFullImageUri(null);
-                setFullImageRecord(null);
-                setIsEditingLocation(false);
-                setEditingLocation("");
-              }}
-            >
-              <Text style={styles.fullImageCloseButtonText}>✕</Text>
-            </TouchableOpacity>
-            {fullImageRecord && !isEditingLocation && (
-              <TouchableOpacity
-                style={styles.editButton}
-                onPress={handleStartEditLocation}
-              >
-                <Text style={styles.editButtonText}>Editar</Text>
-              </TouchableOpacity>
-            )}
-            {isEditingLocation && (
-              <View style={styles.editActions}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={handleCancelEditLocation}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.saveEditButton}
-                  onPress={handleSaveLocation}
-                >
-                  <Text style={styles.saveEditButtonText}>Guardar</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-          <ScrollView
-            style={styles.fullImageModalScrollView}
-            contentContainerStyle={styles.fullImageModalContent}
-          >
-            {/* Miniatura de la imagen */}
-            {fullImageUri && (
-              <TouchableOpacity
-                style={styles.fullImageThumbnailContainer}
-                onPress={() => {
-                  setViewerImageUri(fullImageUri);
-                  setShowFullImageViewer(true);
-                }}
-                activeOpacity={0.8}
-              >
-                <Image
-                  source={{ uri: fullImageUri }}
-                  style={styles.fullImageThumbnail}
-                  resizeMode="cover"
-                />
-              </TouchableOpacity>
-            )}
+        imageUri={fullImageUri}
+        record={fullImageRecord}
+        onOpenImageViewer={(uri) => {
+          setViewerImageUri(uri);
+          setShowFullImageViewer(true);
+        }}
+        onUpdateRecord={updateRecord}
+        onRecordUpdated={setFullImageRecord}
+      />
 
-            {/* Información del registro */}
-            {fullImageRecord && (
-              <>
-                {/* Valor del sensor (solo lectura) */}
-                <View style={styles.readOnlyField}>
-                  <Text style={styles.readOnlyFieldLabel}>Valor del Sensor</Text>
-                  <Text style={styles.readOnlyFieldValue}>
-                    {fullImageRecord.sensorValue !== null
-                      ? fullImageRecord.sensorValue.toString()
-                      : "--"}
-                  </Text>
-                </View>
+      <FullVideoModal
+        visible={showFullVideoModal}
+        onClose={() => {
+          setShowFullVideoModal(false);
+          setFullVideoRecord(null);
+        }}
+        record={fullVideoRecord}
+        onOpenVideoPlayer={() => setShowVideoViewerModal(true)}
+        onUpdateRecord={updateVideoRecord}
+        onRecordUpdated={setFullVideoRecord}
+      />
 
-                {/* Fecha (solo lectura) */}
-                <View style={styles.readOnlyField}>
-                  <Text style={styles.readOnlyFieldLabel}>Fecha</Text>
-                  <Text style={styles.readOnlyFieldValue}>
-                    {new Date(fullImageRecord.timestamp).toLocaleString(
-                      "es-ES",
-                      {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      },
-                    )}
-                  </Text>
-                </View>
-
-                {/* Ubicación: solo texto hasta que se pulse Editar */}
-                {!isEditingLocation ? (
-                  <View style={styles.readOnlyField}>
-                    <Text style={styles.readOnlyFieldLabel}>Ubicación</Text>
-                    <Text style={styles.readOnlyFieldValue}>
-                      {fullImageRecord.location || "No especificada"}
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={styles.inputWrapper}>
-                    <TextInput
-                      name="location"
-                      label="Ubicación"
-                      value={editingLocation}
-                      onChange={(name, value) => setEditingLocation(value)}
-                      disabled={false}
-                      style={styles.darkInput}
-                      placeholder="No especificada"
-                    />
-                  </View>
-                )}
-              </>
-            )}
-          </ScrollView>
-        </View>
-      </Modal>
-
-      {/* Modal de visor de imagen completa */}
-      <Modal
+      <ImageViewerModal
         visible={showFullImageViewer}
-        animationType="fade"
-        transparent={false}
-        onRequestClose={() => {
+        imageUri={viewerImageUri}
+        onClose={() => {
           setShowFullImageViewer(false);
           setViewerImageUri(null);
         }}
-      >
-        <View style={styles.imageViewerContainer}>
-          <TouchableOpacity
-            style={styles.imageViewerCloseButton}
-            onPress={() => {
-              setShowFullImageViewer(false);
-              setViewerImageUri(null);
-            }}
-          >
-            <Text style={styles.imageViewerCloseButtonText}>✕</Text>
-          </TouchableOpacity>
-          {viewerImageUri && (
-            <Image
-              source={{ uri: viewerImageUri }}
-              style={styles.imageViewerImage}
-              resizeMode="contain"
-            />
-          )}
-        </View>
-      </Modal>
+      />
 
-      {/* Modal de galería (fotos + videos) */}
-      <Modal
-        visible={showGalleryModal}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setShowGalleryModal(false)}
-      >
-        <View style={styles.galleryModalContainer}>
-          <View style={styles.galleryModalHeader}>
-            <Text style={styles.modalTitle}>Galería</Text>
-            <TouchableOpacity
-              style={styles.modalCloseButton}
-              onPress={() => setShowGalleryModal(false)}
-            >
-              <Text style={styles.modalCloseButtonText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView style={styles.galleryModalScrollView}>
-            {records.length === 0 && videoRecords.length === 0 ? (
-              <Text style={styles.modalEmptyText}>
-                No hay fotos ni videos guardados aún
-              </Text>
-            ) : (
-              [...records.map((r) => ({ type: "photo" as const, record: r, id: r.id })),
-               ...videoRecords.map((r) => ({ type: "video" as const, record: r, id: r.id })),
-              ]
-                .sort(
-                  (a, b) =>
-                    new Date(b.record.timestamp).getTime() -
-                    new Date(a.record.timestamp).getTime()
-                )
-                .map((item) =>
-                  item.type === "photo" ? (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={styles.galleryItem}
-                      onPress={() => {
-                        setFullImageUri(item.record.imageUri);
-                        setFullImageRecord(item.record);
-                        setShowGalleryModal(false);
-                        setShowFullImageModal(true);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.galleryThumbnailContainer}>
-                        <Image
-                          source={{ uri: item.record.imageUri }}
-                          style={styles.galleryThumbnail}
-                        />
-                      </View>
-                      <View style={styles.galleryInfo}>
-                        <Text style={styles.gallerySensorValue}>
-                          {item.record.sensorValue !== null
-                            ? item.record.sensorValue
-                            : "--"}
-                        </Text>
-                        <Text style={styles.galleryTimestamp}>
-                          {new Date(item.record.timestamp).toLocaleString()}
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          Alert.alert(
-                            "Eliminar Foto",
-                            "¿Estás seguro de que quieres eliminar esta foto?",
-                            [
-                              { text: "Cancelar", style: "cancel" },
-                              {
-                                text: "Eliminar",
-                                style: "destructive",
-                                onPress: async () => {
-                                  try {
-                                    await deleteRecord(item.record.id);
-                                    Alert.alert(
-                                      "Éxito",
-                                      "Foto eliminada correctamente",
-                                    );
-                                  } catch (error) {
-                                    Alert.alert(
-                                      "Error",
-                                      "No se pudo eliminar la foto",
-                                    );
-                                  }
-                                },
-                              },
-                            ],
-                          );
-                        }}
-                      >
-                        <Text style={styles.deleteButtonText}>🗑️</Text>
-                      </TouchableOpacity>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={styles.galleryItem}
-                      onPress={() => {
-                        setViewerVideoUri(item.record.videoUri);
-                        setFullVideoRecord(item.record);
-                        setShowGalleryModal(false);
-                        setShowVideoViewerModal(true);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.galleryThumbnailContainer}>
-                        <View style={styles.galleryVideoThumbnail}>
-                          <VideoIcon size={40} color={AppRed} />
-                          <Text style={styles.galleryVideoLabel}>Video</Text>
-                        </View>
-                      </View>
-                      <View style={styles.galleryInfo}>
-                        <Text style={styles.gallerySensorValue}>
-                          {item.record.sensorValue !== null
-                            ? item.record.sensorValue
-                            : "--"}
-                        </Text>
-                        <Text style={styles.galleryTimestamp}>
-                          {new Date(item.record.timestamp).toLocaleString()}
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          Alert.alert(
-                            "Eliminar Video",
-                            "¿Estás seguro de que quieres eliminar este video?",
-                            [
-                              { text: "Cancelar", style: "cancel" },
-                              {
-                                text: "Eliminar",
-                                style: "destructive",
-                                onPress: async () => {
-                                  try {
-                                    await deleteVideoRecord(item.record.id);
-                                    Alert.alert(
-                                      "Éxito",
-                                      "Video eliminado correctamente",
-                                    );
-                                  } catch (error) {
-                                    Alert.alert(
-                                      "Error",
-                                      "No se pudo eliminar el video",
-                                    );
-                                  }
-                                },
-                              },
-                            ],
-                          );
-                        }}
-                      >
-                        <Text style={styles.deleteButtonText}>🗑️</Text>
-                      </TouchableOpacity>
-                    </TouchableOpacity>
-                  )
-                )
-            )}
-          </ScrollView>
-        </View>
-      </Modal>
-
-      {/* Modal de reproductor de video */}
-      <Modal
+      <VideoViewerModal
         visible={showVideoViewerModal}
-        animationType="fade"
-        transparent={false}
-        onRequestClose={() => {
+        record={fullVideoRecord}
+        onClose={() => {
           setShowVideoViewerModal(false);
-          setViewerVideoUri(null);
-          setFullVideoRecord(null);
         }}
-      >
-        <View style={styles.videoViewerContainer}>
-          <TouchableOpacity
-            style={styles.videoViewerCloseButton}
-            onPress={() => {
-              setShowVideoViewerModal(false);
-              setViewerVideoUri(null);
-              setFullVideoRecord(null);
-            }}
-          >
-            <Text style={styles.videoViewerCloseButtonText}>✕</Text>
-          </TouchableOpacity>
-          {viewerVideoUri && (
-            <Video
-              style={styles.videoPlayer}
-              source={{ uri: viewerVideoUri }}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
-            />
-          )}
-          {fullVideoRecord && (
-            <View style={styles.videoViewerInfo}>
-              <Text style={styles.videoViewerInfoLabel}>
-                Sensor: {fullVideoRecord.sensorValue ?? "--"}
-              </Text>
-              <Text style={styles.videoViewerInfoLabel}>
-                {new Date(fullVideoRecord.timestamp).toLocaleString("es-ES")}
-              </Text>
-              {fullVideoRecord.location && (
-                <Text style={styles.videoViewerInfoLabel}>
-                  {fullVideoRecord.location}
-                </Text>
-              )}
-            </View>
-          )}
-        </View>
-      </Modal>
+      />
+
     </View>
   );
 }
@@ -1891,6 +1044,15 @@ const styles = StyleSheet.create({
     minWidth: 120,
     alignItems: "center",
     justifyContent: "center",
+  },
+  videoRecordButtonCircular: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    minWidth: 0,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
   },
   videoRecordButtonDisabled: {
     backgroundColor: "#666",
@@ -2324,6 +1486,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     elevation: 20,
   },
+  captureButtonRecording: {
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    borderColor: AppRed,
+  },
   captureButtonInner: {
     width: 60,
     height: 60,
@@ -2407,31 +1573,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#1a1a1a",
     borderColor: "#444",
     color: "#fff",
-  },
-  imageViewerContainer: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-  imageViewerCloseButton: {
-    position: "absolute",
-    top: 50,
-    right: 20,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: AppRed,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 10,
-  },
-  imageViewerCloseButtonText: {
-    color: "#fff",
-    fontSize: 24,
-    fontWeight: "bold",
-  },
-  imageViewerImage: {
-    flex: 1,
-    width: "100%",
   },
   galleryModalContainer: {
     flex: 1,

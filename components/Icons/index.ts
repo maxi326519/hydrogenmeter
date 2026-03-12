@@ -1,6 +1,10 @@
 export { VideoIcon } from './VideoIcon';
+export { CloseCircleIcon } from './CloseCircleIcon';
+export { TrashIcon } from './TrashIcon';
 export { WifiOffIcon } from './WifiOffIcon';
 export { WifiOnIcon } from './WifiOnIcon';
+export { BluetoothOnIcon } from './BluetoothOnIcon';
+export { BluetoothSlashIcon } from './BluetoothSlashIcon';
 export { CameraIcon } from './CameraIcon';
 export { FolderIcon } from './FolderIcon';
 export { SoundMaxIcon } from './SoundMaxIcon';
@@ -14,3 +18,4 @@ export { SettingsIcon } from './SettingsIcon';
 export { ArrowUpIcon } from './ArrowUpIcon';
 export { ArrowDownIcon } from './ArrowDownIcon';
 export { ArrowBackIcon } from './ArrowBackIcon';
+export { FlashIcon } from './FlashIcon';

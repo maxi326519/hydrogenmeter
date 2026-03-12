@@ -1,15 +1,21 @@
-import React, { useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
-import { CameraView as ExpoCameraView, useCameraPermissions } from 'expo-camera';
-import { AppRed } from '../constants/Colors';
+import { CameraView as ExpoCameraView } from 'expo-camera';
+import { View, StyleSheet } from 'react-native';
+import React from 'react';
 
 interface CameraViewProps {
   visible: boolean;
   onClose: () => void;
   cameraRef: React.RefObject<ExpoCameraView>;
+  /** Linterna encendida/apagada (enableTorch de expo-camera) */
+  enableTorch?: boolean;
 }
 
-export const CameraView: React.FC<CameraViewProps> = ({ visible, onClose, cameraRef }) => {
+export const CameraView: React.FC<CameraViewProps> = ({
+  visible,
+  onClose,
+  cameraRef,
+  enableTorch = false,
+}) => {
   if (!visible) {
     return null;
   }
@@ -20,7 +26,7 @@ export const CameraView: React.FC<CameraViewProps> = ({ visible, onClose, camera
         ref={cameraRef}
         style={styles.camera}
         facing="back"
-        flash="off"
+        enableTorch={enableTorch}
         animateShutter={false}
       />
     </View>

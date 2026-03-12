@@ -67,6 +67,7 @@ export function useBLEMock() {
   const [discoveredDevices, setDiscoveredDevices] = useState<Device[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [ignoreDisconnection, setIgnoreDisconnection] = useState(false);
+  const [connectionStatusMessage, setConnectionStatusMessage] = useState("");
   const simIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clearConsole = useCallback(() => {
@@ -94,9 +95,10 @@ export function useBLEMock() {
 
   const connectToDevice = useCallback(
     (device: Device) => {
-      setConsoleData((prev) => addConsoleEntry(prev, "✓ Conectando (mock)..."));
+      setConnectionStatusMessage("cargando...");
       setIsLoading(true);
       setTimeout(() => {
+        setConnectionStatusMessage("conectando");
         setConnectedDevice(device);
         setAutoConnectFailed(false);
         setIsLoading(false);
@@ -150,6 +152,24 @@ export function useBLEMock() {
     }, 1000);
   }, []);
 
+  const disconnect = useCallback(() => {
+    if (!connectedDevice) return;
+    if (simIntervalRef.current) {
+      clearInterval(simIntervalRef.current);
+      simIntervalRef.current = null;
+    }
+    setConnectedDevice(null);
+    setAutoConnectFailed(true);
+    setGasPpm(null);
+    setBateria(null);
+    setPreheatProgress(0);
+    setCalibratingProgress(0);
+    setDeviceReady(false);
+    setConsoleData((prev) =>
+      addConsoleEntry(prev, "✓ Desconectado por el usuario")
+    );
+  }, [connectedDevice]);
+
   const connectManually = useCallback(() => {
     if (connectedDevice) {
       setConsoleData((prev) =>
@@ -194,6 +214,8 @@ export function useBLEMock() {
     stopScan,
     discoveredDevices,
     connectToDevice,
+    disconnect,
+    connectionStatusMessage,
     ignoreDisconnectionRef: {
       current: ignoreDisconnection,
       set: setIgnoreDisconnection,
