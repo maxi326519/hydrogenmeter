@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+import { Platform } from 'react-native';
 
 export interface PhotoRecord {
   id: string;
@@ -54,18 +56,32 @@ export const usePhotoStorage = () => {
     }
   };
 
-  // Guardar imagen en el sistema de archivos
+  // Guardar imagen en el sistema de archivos y en la galería del dispositivo
   const saveImageToDevice = async (imageUri: string, recordId: string): Promise<string> => {
     try {
       await ensureImagesDirectory();
       const fileName = `photo_${recordId}.jpg`;
       const newPath = `${IMAGES_DIR}${fileName}`;
       
-      // Copiar la imagen al directorio permanente
+      // Copiar la imagen al directorio permanente de la app
       await FileSystem.copyAsync({
         from: imageUri,
         to: newPath,
       });
+
+      // Guardar también en la galería del dispositivo para acceso desde Fotos/Galería
+      try {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status === 'granted') {
+          const uriForGallery = Platform.OS === 'android' && !newPath.startsWith('file://')
+            ? `file://${newPath}`
+            : newPath;
+          await MediaLibrary.createAssetAsync(uriForGallery);
+        }
+      } catch (galleryError) {
+        console.warn('No se pudo guardar en la galería:', galleryError);
+        // No fallar el guardado: la foto queda guardada en la app
+      }
       
       return newPath;
     } catch (error) {

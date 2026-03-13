@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import * as FileSystem from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
+import { Platform } from "react-native";
 
 export interface VideoRecord {
   id: string;
@@ -66,6 +68,21 @@ export const useVideoStorage = () => {
         from: fromUri,
         to: newPath,
       });
+
+      // Guardar también en la galería del dispositivo para acceso desde Fotos/Galería
+      try {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status === "granted") {
+          const uriForGallery =
+            Platform.OS === "android" && !newPath.startsWith("file://")
+              ? `file://${newPath}`
+              : newPath;
+          await MediaLibrary.createAssetAsync(uriForGallery);
+        }
+      } catch (galleryError) {
+        console.warn("No se pudo guardar el video en la galería:", galleryError);
+        // No fallar el guardado: el video queda guardado en la app
+      }
 
       return newPath;
     } catch (error) {

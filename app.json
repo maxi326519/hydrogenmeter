@@ -23,7 +23,8 @@
       "bundleIdentifier": "com.rotech.bleconnection",
       "infoPlist": {
         "NSCameraUsageDescription": "Esta app necesita acceso a la cámara para capturar imágenes",
-        "NSMicrophoneUsageDescription": "Para grabar audio junto con el video de medición"
+        "NSMicrophoneUsageDescription": "Para grabar audio junto con el video de medición",
+        "NSPhotoLibraryAddUsageDescription": "Para guardar fotos y videos en tu galería"
       }
     },
     "android": {
@@ -69,6 +70,12 @@
         "expo-camera",
         {
           "cameraPermission": "Permitir acceso a la cámara para capturar imágenes"
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Permitir guardar fotos y videos en tu galería para que puedas acceder a ellos desde la app Fotos"
         }
       ],
       "./plugins/withAndroidLint"
