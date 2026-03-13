@@ -9,11 +9,12 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/images/logo.png",
+      "image": "./assets/images/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#2d2d2d"
     },
     "splashScreen": {
+      "image": "./assets/images/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#2d2d2d"
     },
@@ -26,6 +27,7 @@
       }
     },
     "android": {
+      "backgroundColor": "#2d2d2d",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/logo-icon.png",
         "backgroundColor": "#F44336"
@@ -49,12 +51,17 @@
       "favicon": "./assets/images/logo-icon.png"
     },
     "plugins": [
-      ["expo-router"],
+      [
+        "expo-router"
+      ],
       [
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": true,
-          "modes": ["peripheral", "central"],
+          "modes": [
+            "peripheral",
+            "central"
+          ],
           "bluetoothAlwaysPermission": "Allow $(PRODUCT_NAME) to connect to bluetooth devices"
         }
       ],

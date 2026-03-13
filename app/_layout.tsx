@@ -1,9 +1,14 @@
+import { useKeepAwake } from "expo-keep-awake";
+import { useEffect } from "react";
 import { AppRed } from "../constants/Colors";
 import { Stack } from "expo-router";
-import { useEffect } from "react";
 import * as SplashScreen from "expo-splash-screen";
 
+SplashScreen.preventAutoHideAsync();
+
 export default function RootLayout() {
+  useKeepAwake();
+
   useEffect(() => {
     SplashScreen.hideAsync();
   }, []);
