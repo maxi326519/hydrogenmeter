@@ -18,17 +18,8 @@ import {
 import TextInput from "./Inputs/TextInput";
 import RecordScreen from "react-native-record-screen";
 import * as FileSystem from "expo-file-system";
-import {
-  useVideoOverlay,
-  type VideoOverlayTimelineItem,
-} from "../hooks/useVideoOverlay";
-
-/** Datos de prueba para drawtext dinámico tras grabar (FFmpeg). */
-const VIDEO_OVERLAY_TEST_DATA: VideoOverlayTimelineItem[] = [
-  { time: 0, value: "PPM demo 0s" },
-  { time: 2, value: "PPM demo 2s" },
-  { time: 4, value: "PPM demo 4s" },
-];
+import { useVideoOverlay } from "../hooks/useVideoOverlay";
+import { useSensorOverlayTimeline } from "../hooks/useSensorOverlayTimeline";
 
 export interface VideoSectionProps {
   visible: boolean;
@@ -75,7 +66,18 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
   const [showVideoFormModal, setShowVideoFormModal] = useState(false);
   const [recordingStartDate, setRecordingStartDate] = useState<Date | null>(null);
   const maxPpmDuringRecordingRef = useRef<number | null>(null);
+  const gasPpmRef = useRef<number | null>(gasPpm);
   const { addOverlay } = useVideoOverlay();
+  const {
+    beginSession: beginOverlaySession,
+    endSession: endOverlaySession,
+    getElapsedSeconds,
+    abortSession: abortOverlaySession,
+  } = useSensorOverlayTimeline(isVideoRecording, gasPpm);
+
+  useEffect(() => {
+    gasPpmRef.current = gasPpm;
+  }, [gasPpm]);
 
   // Registrar el máximo PPM durante la grabación (para video se guarda el más alto)
   useEffect(() => {
@@ -125,11 +127,12 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
         return;
       }
       maxPpmDuringRecordingRef.current = gasPpm; // Inicializar para nueva grabación
+      beginOverlaySession(gasPpm);
       setRecordingStartDate(new Date()); // Fecha actual al iniciar grabación
       setIsVideoRecording(true);
       setVideoRecordingDuration(0);
       videoRecordingIntervalRef.current = setInterval(() => {
-        setVideoRecordingDuration((d) => d + 0.1);
+        setVideoRecordingDuration(getElapsedSeconds());
       }, 100);
     } catch (error) {
       console.error("Error iniciando grabación:", error);
@@ -138,7 +141,7 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
         `No se pudo iniciar la grabación: ${(error as Error).message}`
       );
     }
-  }, [isVideoRecording, gasPpm]);
+  }, [isVideoRecording, gasPpm, beginOverlaySession, getElapsedSeconds]);
 
   const handleStopVideoRecording = useCallback(async () => {
     if (!isVideoRecording) return;
@@ -149,6 +152,10 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
         clearInterval(videoRecordingIntervalRef.current);
         videoRecordingIntervalRef.current = null;
       }
+      const { overlayData, durationSec: recordingDurationSec } =
+        endOverlaySession(gasPpmRef.current);
+      const recordingStartedAtForOverlay = recordingStartDate ?? new Date();
+
       setIsVideoRecording(false);
       setRecordingStartDate(null);
       setIsProcessingVideo(true);
@@ -193,7 +200,9 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
             await addOverlay({
               inputPath: inputFs,
               outputPath: outputFs,
-              data: VIDEO_OVERLAY_TEST_DATA,
+              data: overlayData,
+              recordingStartedAt: recordingStartedAtForOverlay,
+              recordingDurationSec,
             });
             handleVideoRecordingComplete(`file://${outputFs}`);
           } catch (overlayErr) {
@@ -222,9 +231,17 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
         `No se pudo detener la grabación: ${(error as Error).message}`
       );
     } finally {
+      abortOverlaySession();
       setIsProcessingVideo(false);
     }
-  }, [isVideoRecording, handleVideoRecordingComplete, addOverlay]);
+  }, [
+    isVideoRecording,
+    recordingStartDate,
+    handleVideoRecordingComplete,
+    addOverlay,
+    endOverlaySession,
+    abortOverlaySession,
+  ]);
 
   const handleSaveVideo = async () => {
     if (!capturedVideoUri) {
