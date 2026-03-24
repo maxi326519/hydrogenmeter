@@ -16,7 +16,6 @@ import {
   ActivityIndicator,
 } from "react-native";
 import TextInput from "./Inputs/TextInput";
-import RecordScreen from "react-native-record-screen";
 import * as FileSystem from "expo-file-system";
 import { useVideoOverlay } from "../hooks/useVideoOverlay";
 import { useSensorOverlayTimeline } from "../hooks/useSensorOverlayTimeline";
@@ -59,6 +58,9 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
   const [isProcessingVideo, setIsProcessingVideo] = useState(false);
   const [videoRecordingDuration, setVideoRecordingDuration] = useState(0);
   const videoRecordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cameraRecordingPromiseRef = useRef<
+    Promise<{ uri?: string } | undefined> | null
+  >(null);
   const processingCancelledRef = useRef(false);
   const [capturedVideoUri, setCapturedVideoUri] = useState<string | null>(null);
   const [videoSensorValue, setVideoSensorValue] = useState<number | null>(null);
@@ -115,39 +117,39 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
 
   const handleStartVideoRecording = useCallback(async () => {
     if (isVideoRecording) return;
+    const cam = cameraRef.current;
+    if (!cam) {
+      Alert.alert(
+        "Cámara",
+        "La cámara no está lista. Espera un momento e inténtalo de nuevo."
+      );
+      return;
+    }
     try {
-      // NO llamar clean() antes de start: borra el directorio de salida y hace que HBRecorder falle.
-      // clean() es solo para liberar espacio (Clean Sandbox), no antes de cada grabación.
-      const result = await RecordScreen.startRecording({ mic: false });
-      if (result === "permission_error") {
-        Alert.alert(
-          "Permiso denegado",
-          "Se necesita permiso para grabar la pantalla."
-        );
-        return;
-      }
-      maxPpmDuringRecordingRef.current = gasPpm; // Inicializar para nueva grabación
+      cameraRecordingPromiseRef.current = cam.recordAsync({
+        maxDuration: 600,
+      });
+      maxPpmDuringRecordingRef.current = gasPpm;
       beginOverlaySession(gasPpm);
-      setRecordingStartDate(new Date()); // Fecha actual al iniciar grabación
+      setRecordingStartDate(new Date());
       setIsVideoRecording(true);
       setVideoRecordingDuration(0);
       videoRecordingIntervalRef.current = setInterval(() => {
         setVideoRecordingDuration(getElapsedSeconds());
       }, 100);
     } catch (error) {
+      cameraRecordingPromiseRef.current = null;
       console.error("Error iniciando grabación:", error);
       Alert.alert(
         "Error",
         `No se pudo iniciar la grabación: ${(error as Error).message}`
       );
     }
-  }, [isVideoRecording, gasPpm, beginOverlaySession, getElapsedSeconds]);
+  }, [isVideoRecording, gasPpm, cameraRef, beginOverlaySession, getElapsedSeconds]);
 
   const handleStopVideoRecording = useCallback(async () => {
     if (!isVideoRecording) return;
     try {
-      console.log(1); // NO BORRAR
-
       if (videoRecordingIntervalRef.current) {
         clearInterval(videoRecordingIntervalRef.current);
         videoRecordingIntervalRef.current = null;
@@ -161,20 +163,21 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
       setIsProcessingVideo(true);
       processingCancelledRef.current = false;
 
-      console.log(2); // NO BORRAR
+      const cam = cameraRef.current;
+      const recordingPromise = cameraRecordingPromiseRef.current;
+      cameraRecordingPromiseRef.current = null;
+      cam?.stopRecording();
 
-      const result = await RecordScreen.stopRecording();
-
-      console.log(3, result); // NO BORRAR
+      let rawUrl: string | undefined;
+      try {
+        const recorded = recordingPromise ? await recordingPromise : undefined;
+        rawUrl = recorded?.uri;
+      } catch (recErr) {
+        console.error("[VideoSection] Error al finalizar recordAsync:", recErr);
+      }
 
       if (processingCancelledRef.current) return;
 
-      // Documentación: res.result.outputURL
-      const typedResult = result as { status?: string; result?: { outputURL?: string } };
-
-      console.log(4, typedResult); // NO BORRAR
-
-      const rawUrl = typedResult?.result?.outputURL;
       if (rawUrl && typeof rawUrl === "string") {
         let videoUri = rawUrl.trim();
         if (!videoUri.startsWith("file://") && !videoUri.startsWith("content://")) {
@@ -183,7 +186,6 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
 
         if (videoUri.startsWith("file://")) {
           const inputFs = videoUri.replace(/^file:\/\//, "");
-          /** Caché de la app: escribible sin crear subcarpetas (evita error en `files/videos/` en algunos Android). */
           const cacheRoot = FileSystem.cacheDirectory ?? "";
           let outputFs: string;
           if (cacheRoot) {
@@ -216,14 +218,12 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
           handleVideoRecordingComplete(videoUri);
         }
       } else {
-        console.warn("[VideoSection] Sin outputURL válido. result:", JSON.stringify(result));
+        console.warn("[VideoSection] Sin URI de video válida tras recordAsync");
         Alert.alert(
           "Error",
-          "No se pudo obtener el video grabado. Verifica los permisos de almacenamiento."
+          "No se pudo obtener el video grabado. Verifica permisos de cámara y almacenamiento."
         );
       }
-      console.log(5, rawUrl); // NO BORRAR
-
     } catch (error) {
       console.error("Error deteniendo grabación:", error);
       Alert.alert(
@@ -237,6 +237,7 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
   }, [
     isVideoRecording,
     recordingStartDate,
+    cameraRef,
     handleVideoRecordingComplete,
     addOverlay,
     endOverlaySession,

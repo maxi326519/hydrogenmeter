@@ -3,4 +3,4 @@
  * true = usa useBLEMock (datos artificiales)
  * false = usa useBLE (dispositivo real)
  */
-export const MOCK_BLE_ENABLED = true;
+export const MOCK_BLE_ENABLED = false;

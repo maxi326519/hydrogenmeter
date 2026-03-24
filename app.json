@@ -76,7 +76,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Permitir acceso a la cámara para capturar imágenes"
+          "cameraPermission": "Permitir acceso a la cámara para capturar imágenes",
+          "microphonePermission": "Permitir el micrófono para grabar audio en los vídeos de medición"
         }
       ],
       [

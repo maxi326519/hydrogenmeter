@@ -11,7 +11,7 @@ import React from "react";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-/** Formatea segundos a MM:SS (ej: 65 → "1:05") */
+/** Formatea segundos a MM:SS (ej: 65 ? "1:05") */
 const formatDuration = (seconds: number) => {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -19,9 +19,8 @@ const formatDuration = (seconds: number) => {
 };
 
 /**
- * Vista de cámara con overlay de datos del sensor para modo video.
- * La grabación se hace con react-native-record-screen (grabación de pantalla)
- * desde MainPage, lo que captura correctamente la cámara nativa + overlay.
+ * Overlay de datos del sensor en modo video. La c?mara vive en MainPage (CameraView);
+ * la grabaci?n es con expo-camera recordAsync sobre el mismo ref.
  */
 interface VideoRecordingCameraViewProps {
   visible: boolean;
@@ -30,11 +29,11 @@ interface VideoRecordingCameraViewProps {
   ppmDirection: "up" | "down" | null;
   isRecording?: boolean;
   recordedDuration?: number;
-  /** Fecha al iniciar grabación - se muestra en overlay y se actualiza durante la grabación */
+  /** Fecha al iniciar grabaci?n - se muestra en overlay y se actualiza durante la grabaci?n */
   recordingStartDate?: Date | null;
   /** Linterna encendida/apagada (enableTorch de expo-camera) */
   enableTorch?: boolean;
-  /** Si true, la cámara ya está montada en el padre (evita pantalla negra al alternar modos) */
+  /** Si true, la c?mara ya est? montada en el padre (evita pantalla negra al alternar modos) */
   cameraProvidedExternally?: boolean;
 }
 
@@ -54,19 +53,25 @@ export const VideoRecordingCameraView: React.FC<VideoRecordingCameraViewProps> =
   }
 
   return (
-    <View style={styles.container}>
-      {/* Cámara - omitida cuando ya está montada en MainPage (evita pantalla negra al alternar) */}
-      <ExpoCameraView
-        ref={cameraRef}
-        style={styles.camera}
-        facing="back"
-        enableTorch={enableTorch}
-        animateShutter={false}
-      />
+    <View style={styles.container} pointerEvents="box-none">
+      {!cameraProvidedExternally && (
+        <ExpoCameraView
+          ref={cameraRef}
+          style={styles.camera}
+          facing="back"
+          mode="video"
+          mute={false}
+          videoQuality="1080p"
+          ratio="16:9"
+          videoStabilizationMode="standard"
+          enableTorch={enableTorch}
+          animateShutter={false}
+        />
+      )}
 
       {/* Overlay con datos del sensor - mismo layout que modo foto */}
       <View style={styles.overlay} pointerEvents="none">
-        {/* Marca de agua - fecha actual al grabar. Debajo del contador cuando se está grabando */}
+        {/* Marca de agua - fecha actual al grabar. Debajo del contador cuando se est? grabando */}
         <View style={styles.watermark}>
           <Text style={styles.watermarkText}>Hydrogen Meter</Text>
           <Text style={styles.watermarkDate}>

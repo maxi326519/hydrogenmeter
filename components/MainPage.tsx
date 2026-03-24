@@ -29,6 +29,7 @@ import {
 } from "./modals";
 import {
   useCameraPermissions,
+  useMicrophonePermissions,
   CameraView as ExpoCameraView,
 } from "expo-camera";
 import {
@@ -93,6 +94,7 @@ export default function MainPage() {
   const previousPpmRef = useRef<number | null>(null);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [, requestMicrophonePermission] = useMicrophonePermissions();
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [showPhotoFormModal, setShowPhotoFormModal] = useState(false);
   const [showFullImageModal, setShowFullImageModal] = useState(false);
@@ -294,6 +296,14 @@ export default function MainPage() {
         setShowCamera(true);
         return;
       }
+    }
+
+    const mic = await requestMicrophonePermission();
+    if (!mic.granted) {
+      Alert.alert(
+        "Micrófono",
+        "Sin permiso de micrófono el vídeo se grabará sin audio. Puedes activarlo en Ajustes del sistema.",
+      );
     }
 
     setCameraMode("video");
@@ -520,6 +530,8 @@ export default function MainPage() {
           visible={showCamera}
           cameraRef={cameraRef}
           enableTorch={flashEnabled}
+          mode={cameraMode === "video" ? "video" : "picture"}
+          mute={false}
         />
       )}
 
@@ -569,7 +581,16 @@ export default function MainPage() {
             }}
             flashEnabled={flashEnabled}
             onFlashPress={() => setFlashEnabled(!flashEnabled)}
-            onSwitchToVideoMode={() => setCameraMode("video")}
+            onSwitchToVideoMode={async () => {
+              const mic = await requestMicrophonePermission();
+              if (!mic.granted) {
+                Alert.alert(
+                  "Micrófono",
+                  "Sin permiso de micrófono el vídeo se grabará sin audio. Puedes activarlo en Ajustes del sistema.",
+                );
+              }
+              setCameraMode("video");
+            }}
             isProcessing={isProcessingPhoto}
             captureButton={
               <CameraCaptureButton
@@ -881,7 +902,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 200,
+    bottom: 155,
     alignItems: "center",
     justifyContent: "flex-start",
     zIndex: 26,
@@ -1529,7 +1550,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 0,
     alignItems: "center",
-    paddingBottom: 300,
+    paddingBottom: 260,
     zIndex: 25,
     elevation: 25,
     width: "100%",
