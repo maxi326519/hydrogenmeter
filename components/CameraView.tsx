@@ -4,7 +4,6 @@ import React from 'react';
 
 interface CameraViewProps {
   visible: boolean;
-  onClose: () => void;
   cameraRef: React.RefObject<ExpoCameraView>;
   /** Linterna encendida/apagada (enableTorch de expo-camera) */
   enableTorch?: boolean;
@@ -12,7 +11,6 @@ interface CameraViewProps {
 
 export const CameraView: React.FC<CameraViewProps> = ({
   visible,
-  onClose,
   cameraRef,
   enableTorch = false,
 }) => {

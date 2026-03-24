@@ -1,5 +1,6 @@
-import { Platform, PermissionsAndroid } from "react-native";
 import { useEffect, useRef, useCallback } from "react";
+import { Platform, PermissionsAndroid } from "react-native";
+import { useBLEStore } from "../stores/useBLEStore";
 import { Base64 } from "js-base64";
 import {
   BleManager,
@@ -8,7 +9,6 @@ import {
   Characteristic,
 } from "react-native-ble-plx";
 import * as ExpoDevice from "expo-device";
-import { useBLEStore } from "../stores/useBLEStore";
 
 const requestAndroid31Permissions = async () => {
   const bluetoothScanPermission = await PermissionsAndroid.request(
@@ -180,7 +180,11 @@ export const useBLE = () => {
       if (calibratingMatch) {
         setPreheatProgress(100); // Si está calibrando, preheat tiene que estar en 100
         const value = parseInt(calibratingMatch[1], 10);
-        if (!isNaN(value)) setCalibratingProgress(value);
+        if (!isNaN(value)) {
+          setCalibratingProgress(value);
+          // Desbloquear botones cuando calibración llega a 100% (evitar race: getState puede estar desactualizado)
+          if (value === 100) setDeviceReady(true);
+        }
       }
 
       const state = useBLEStore.getState();
@@ -436,8 +440,7 @@ export const useBLE = () => {
             } catch (discoverError) {
               // Si falla el descubrimiento, puede ser que el emparejamiento a?n no est? completo
               console.log(
-                `Intento ${
-                  verificationAttempts + 1
+                `Intento ${verificationAttempts + 1
                 }: Emparejamiento a?n en progreso...`,
               );
               verificationAttempts++;
@@ -588,8 +591,7 @@ export const useBLE = () => {
           (e as any).message.includes("permission"))
       ) {
         addConsoleMessage(
-          `?? Error de emparejamiento: ${
-            (e as any).message
+          `?? Error de emparejamiento: ${(e as any).message
           }. Intenta nuevamente.`,
         );
       } else {
@@ -1018,6 +1020,7 @@ export const useBLE = () => {
     connectedDevice,
     hc06Device,
     isLoading,
+    isConnecting: isConnectingState,
     isScanning: isScanningState,
     autoConnectFailed,
     connectionStatusMessage,

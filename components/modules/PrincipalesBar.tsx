@@ -1,8 +1,7 @@
-import React from "react";
 import { View, StyleSheet } from "react-native";
 import { IconButton } from "../IconButton";
+import { AppRed } from "../../constants/Colors";
 import {
-  BluetoothOnIcon,
   BluetoothSlashIcon,
   CameraIcon,
   VideoIcon,
@@ -11,12 +10,12 @@ import {
   SoundMuteIcon,
   SettingsIcon,
 } from "../Icons";
-import { AppRed } from "../../constants/Colors";
+import React from "react";
 
 export interface PrincipalesBarProps {
   connectedDevice: boolean;
   alarmEnabled: boolean;
-  onWifiPress: () => void;
+  onDisconnect: () => void;
   onCameraPress: () => void;
   onVideoPress: () => void;
   onFilesPress: () => void;
@@ -30,7 +29,7 @@ export interface PrincipalesBarProps {
 export const PrincipalesBar: React.FC<PrincipalesBarProps> = ({
   connectedDevice,
   alarmEnabled,
-  onWifiPress,
+  onDisconnect,
   onCameraPress,
   onVideoPress,
   onFilesPress,
@@ -51,16 +50,12 @@ export const PrincipalesBar: React.FC<PrincipalesBarProps> = ({
       )}
 
       <View style={styles.iconButtonsContainer}>
-        <IconButton
-          icon={
-            connectedDevice ? (
-              <BluetoothOnIcon size={28} color={AppRed} />
-            ) : (
-              <BluetoothSlashIcon size={28} color={AppRed} />
-            )
-          }
-          onPress={onWifiPress}
-        />
+        {connectedDevice && (
+          <IconButton
+            icon={<BluetoothSlashIcon size={28} color={AppRed} />}
+            onPress={onDisconnect}
+          />
+        )}
         <IconButton
           icon={<CameraIcon size={28} color={AppRed} />}
           onPress={onCameraPress}

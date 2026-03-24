@@ -2,7 +2,6 @@ import React, { useState, useRef, useCallback, useEffect } from "react";
 import { CameraView as ExpoCameraView } from "expo-camera";
 import { VideoRecordingCameraView } from "./VideoRecordingCameraView";
 import { CameraBar, ModalHeader } from "./modules";
-import { RadialProgressBar } from "./RadialProgressBar";
 import { Video, ResizeMode } from "expo-av";
 import type { VideoRecord } from "../hooks/useVideoStorage";
 import { AppRed } from "../constants/Colors";
@@ -18,8 +17,6 @@ import {
 } from "react-native";
 import TextInput from "./Inputs/TextInput";
 import RecordScreen from "react-native-record-screen";
-
-const VIDEO_PROGRESS_MAX_SEC = 60;
 
 export interface VideoSectionProps {
   visible: boolean;
@@ -184,16 +181,6 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
     }
   }, [isVideoRecording, handleVideoRecordingComplete]);
 
-  // Pausar/detener grabación automáticamente cuando la barra de progreso llega al final (60 s)
-  useEffect(() => {
-    if (
-      isVideoRecording &&
-      videoRecordingDuration >= VIDEO_PROGRESS_MAX_SEC - 0.05
-    ) {
-      handleStopVideoRecording();
-    }
-  }, [isVideoRecording, videoRecordingDuration, handleStopVideoRecording]);
-
   const handleSaveVideo = async () => {
     if (!capturedVideoUri) {
       Alert.alert("Error", "No hay video para guardar");
@@ -272,19 +259,7 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
             }
           >
             {isVideoRecording ? (
-              <>
-                <RadialProgressBar
-                  size={80}
-                  strokeWidth={4}
-                  progress={Math.min(
-                    videoRecordingDuration / VIDEO_PROGRESS_MAX_SEC,
-                    1
-                  )}
-                  color={AppRed}
-                  backgroundColor="rgba(255,255,255,0.3)"
-                />
-                <View style={styles.recordStopIcon} />
-              </>
+              <View style={styles.recordStopIcon} />
             ) : (
               <View style={styles.recordCircleIcon} />
             )}

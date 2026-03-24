@@ -1,5 +1,5 @@
 import { CameraView as ExpoCameraView } from "expo-camera";
-import { ArrowUpIcon, ArrowDownIcon } from "./Icons";
+import { PpmRangeDisplay } from "./PpmRangeDisplay";
 import { AppRed } from "../constants/Colors";
 import {
   View,
@@ -7,9 +7,16 @@ import {
   Text,
   Dimensions,
 } from "react-native";
-  import React from "react";
+import React from "react";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+
+/** Formatea segundos a MM:SS (ej: 65 → "1:05") */
+const formatDuration = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+};
 
 /**
  * Vista de cámara con overlay de datos del sensor para modo video.
@@ -49,60 +56,24 @@ export const VideoRecordingCameraView: React.FC<VideoRecordingCameraViewProps> =
   return (
     <View style={styles.container}>
       {/* Cámara - omitida cuando ya está montada en MainPage (evita pantalla negra al alternar) */}
-      {!cameraProvidedExternally && (
-        <ExpoCameraView
-          ref={cameraRef}
-          style={styles.camera}
-          facing="back"
-          enableTorch={enableTorch}
-          animateShutter={false}
-        />
-      )}
+      <ExpoCameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing="back"
+        enableTorch={enableTorch}
+        animateShutter={false}
+      />
 
       {/* Overlay con datos del sensor - mismo layout que modo foto */}
       <View style={styles.overlay} pointerEvents="none">
-        {/* Barra de rango 0-10,000 (igual que foto) */}
-        <View style={styles.rangeBarContainerCamera}>
-          <View style={styles.rangeBar}>
-            <View
-              style={[
-                styles.rangeBarFill,
-                {
-                  width: `${Math.min(
-                    ((gasPpm !== null ? gasPpm : 0) / 10000) * 100,
-                    100
-                  )}%`,
-                },
-              ]}
-            />
-          </View>
-        </View>
-        {/* Número PPM (igual que foto) */}
-        <View style={styles.ppmTopContainer}>
-          <View style={styles.ppmContainer}>
-            <Text style={styles.ppmValue}>
-              {gasPpm !== null ? gasPpm : "--"}
-            </Text>
-            {gasPpm !== null && ppmDirection === "up" && (
-              <View style={styles.ppmArrow}>
-                <ArrowUpIcon size={40} color={AppRed} />
-              </View>
-            )}
-            {gasPpm !== null && ppmDirection === "down" && (
-              <View style={styles.ppmArrow}>
-                <ArrowDownIcon size={40} color={AppRed} />
-              </View>
-            )}
-          </View>
-        </View>
-        {/* Marca de agua - fecha actual al grabar, se actualiza durante la grabación */}
+        {/* Marca de agua - fecha actual al grabar. Debajo del contador cuando se está grabando */}
         <View style={styles.watermark}>
           <Text style={styles.watermarkText}>Hydrogen Meter</Text>
           <Text style={styles.watermarkDate}>
             {(recordingStartDate
               ? new Date(
-                  recordingStartDate.getTime() + (recordedDuration || 0) * 1000
-                )
+                recordingStartDate.getTime() + (recordedDuration || 0) * 1000
+              )
               : new Date()
             ).toLocaleDateString("es-ES", {
               day: "2-digit",
@@ -114,6 +85,11 @@ export const VideoRecordingCameraView: React.FC<VideoRecordingCameraViewProps> =
             })}
           </Text>
         </View>
+        <PpmRangeDisplay
+          gasPpm={gasPpm}
+          ppmDirection={ppmDirection}
+          variant="camera"
+        />
       </View>
     </View>
   );
@@ -143,54 +119,23 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.3)",
     pointerEvents: "none",
   },
-  rangeBarContainerCamera: {
-    position: "absolute",
-    bottom: 0,
-    alignItems: "center",
-    paddingBottom: 300,
-    zIndex: 25,
-    elevation: 25,
-    width: "100%",
-    maxWidth: 300,
-    alignSelf: "center",
-  },
-  rangeBar: {
-    width: "100%",
-    height: 16,
-    backgroundColor: "#444",
-    borderRadius: 8,
-    overflow: "hidden",
-  },
-  rangeBarFill: {
-    height: "100%",
-    backgroundColor: AppRed,
-    borderRadius: 8,
-  },
-  ppmTopContainer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 200,
-    alignItems: "center",
-    justifyContent: "flex-start",
-    zIndex: 26,
-    elevation: 26,
-  },
-  ppmContainer: {
+  recordingTimerContainer: {
+    zIndex: 30,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    width: 100,
+    borderRadius: 8,
+    gap: 8,
   },
-  ppmValue: {
-    fontSize: 72,
-    fontWeight: "bold",
-    color: AppRed,
-    textShadowColor: "rgba(0, 0, 0, 0.8)",
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 4,
-  },
-  ppmArrow: {
-    marginLeft: 12,
+  recordingTimerText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
   },
   watermark: {
     position: "absolute",

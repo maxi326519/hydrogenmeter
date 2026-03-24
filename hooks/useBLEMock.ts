@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { Device } from "react-native-ble-plx";
 import type { ConsoleEntry } from "./useBLE";
+import type { Device } from "react-native-ble-plx";
 
 /** Dispositivo simulado para el mock */
 const MOCK_DEVICE = {
@@ -66,6 +66,7 @@ export function useBLEMock() {
   const [deviceReady, setDeviceReady] = useState(false);
   const [discoveredDevices, setDiscoveredDevices] = useState<Device[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [ignoreDisconnection, setIgnoreDisconnection] = useState(false);
   const [connectionStatusMessage, setConnectionStatusMessage] = useState("");
   const simIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -79,29 +80,50 @@ export function useBLEMock() {
     setDeviceReady(false);
   }, []);
 
-  const startDiscoveryScan = useCallback(() => {
-    setConsoleData((prev) => addConsoleEntry(prev, "🔍 Buscando dispositivos (mock)..."));
-    // Mostrar dispositivo simulado de inmediato (sin setTimeout)
-    setDiscoveredDevices([MOCK_DEVICE]);
-    setIsScanning(false);
-    setConsoleData((prev) =>
-      addConsoleEntry(prev, "✓ Escaneo finalizado. 1 dispositivo(s) encontrado(s).")
-    );
-  }, []);
+  const stopScan = useCallback(
+    (options?: { waitBeforeNextScan?: boolean }) => {
+      setIsScanning(false);
+      if (options?.waitBeforeNextScan) {
+        return new Promise<void>((resolve) => setTimeout(resolve, 450));
+      }
+      return Promise.resolve();
+    },
+    []
+  );
 
-  const stopScan = useCallback(() => {
-    setIsScanning(false);
-  }, []);
+  const startDiscoveryScan = useCallback(async () => {
+    if (connectedDevice) {
+      setConsoleData((prev) =>
+        addConsoleEntry(prev, "✓ Dispositivo ya está conectado")
+      );
+      return;
+    }
+    await stopScan({ waitBeforeNextScan: true });
+    setDiscoveredDevices([]);
+    setIsScanning(true);
+    setConsoleData((prev) =>
+      addConsoleEntry(prev, "🔍 Buscando dispositivos (mock)...")
+    );
+    setTimeout(() => {
+      setDiscoveredDevices([MOCK_DEVICE]);
+      setIsScanning(false);
+      setConsoleData((prev) =>
+        addConsoleEntry(prev, "✓ Escaneo finalizado. 1 dispositivo(s) encontrado(s).")
+      );
+    }, 500);
+  }, [connectedDevice, stopScan]);
 
   const connectToDevice = useCallback(
     (device: Device) => {
       setConnectionStatusMessage("cargando...");
+      setIsConnecting(true);
       setIsLoading(true);
       setTimeout(() => {
         setConnectionStatusMessage("conectando");
         setConnectedDevice(device);
         setAutoConnectFailed(false);
         setIsLoading(false);
+        setIsConnecting(false);
         setShowDisconnectAlert(false);
         setConsoleData((prev) =>
           addConsoleEntry(prev, "✓ Conectado y listo para recibir datos (mock)")
@@ -152,7 +174,7 @@ export function useBLEMock() {
     }, 1000);
   }, []);
 
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback(async () => {
     if (!connectedDevice) return;
     if (simIntervalRef.current) {
       clearInterval(simIntervalRef.current);
@@ -171,20 +193,8 @@ export function useBLEMock() {
   }, [connectedDevice]);
 
   const connectManually = useCallback(() => {
-    if (connectedDevice) {
-      setConsoleData((prev) =>
-        addConsoleEntry(prev, "✓ Dispositivo ya está conectado")
-      );
-      return;
-    }
-    setConsoleData((prev) => addConsoleEntry(prev, "🔍 Buscando dispositivos (mock)..."));
-    setIsScanning(true);
-    setTimeout(() => {
-      setDiscoveredDevices([MOCK_DEVICE]);
-      setIsScanning(false);
-      connectToDevice(MOCK_DEVICE);
-    }, 1000);
-  }, [connectedDevice, connectToDevice]);
+    startDiscoveryScan();
+  }, [startDiscoveryScan]);
 
   useEffect(() => {
     return () => {
@@ -194,12 +204,15 @@ export function useBLEMock() {
     };
   }, []);
 
+  // Misma interfaz que useBLE: mismo orden y estructura de retorno
   return {
     connectedDevice,
     hc06Device: connectedDevice,
     isLoading,
+    isConnecting,
     isScanning,
     autoConnectFailed,
+    connectionStatusMessage,
     consoleData,
     gasPpm,
     bateria,
@@ -215,7 +228,6 @@ export function useBLEMock() {
     discoveredDevices,
     connectToDevice,
     disconnect,
-    connectionStatusMessage,
     ignoreDisconnectionRef: {
       current: ignoreDisconnection,
       set: setIgnoreDisconnection,

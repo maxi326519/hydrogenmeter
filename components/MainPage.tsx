@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { usePhotoStorage, PhotoRecord } from "../hooks/usePhotoStorage";
 import { useVideoStorage, VideoRecord } from "../hooks/useVideoStorage";
 import { MOCK_BLE_ENABLED } from "@/constants/mockBLE";
+import { PpmRangeDisplay } from "./PpmRangeDisplay";
+import { PhotoCameraView } from "./PhotoCameraView";
+import { PhotoWithOverlayView } from "./PhotoWithOverlayView";
 import { useBLEOrMock } from "../hooks/useBLEOrMock";
 import { VideoSection } from "./VideoSection";
 import { captureRef } from "react-native-view-shot";
@@ -35,7 +38,6 @@ import {
   StyleSheet,
   Alert,
   Animated,
-  Image,
   Dimensions,
   ActivityIndicator,
 } from "react-native";
@@ -45,21 +47,19 @@ import {
   Battery50Icon,
   Battery75Icon,
   Battery100Icon,
-  ArrowUpIcon,
-  ArrowDownIcon,
 } from "./Icons";
 
 export default function MainPage() {
   const {
     connectedDevice,
     isLoading,
+    isConnecting,
     autoConnectFailed,
     consoleData,
     gasPpm,
     bateria,
     preheatProgress,
     calibratingProgress,
-    deviceReady,
     showDisconnectAlert,
     setShowDisconnectAlert,
     connectManually,
@@ -71,8 +71,13 @@ export default function MainPage() {
     connectToDevice,
     isScanning,
     disconnect,
-    connectionStatusMessage,
   } = useBLEOrMock();
+
+  // Desbloquear botones de foto/video cuando hay datos del sensor (no solo al terminar calibración).
+  // Permite reconexiones donde el equipo ya venía calibrado.
+  // Bloquear si: no conectado, conectando, o sin datos aún (calibrando).
+  const canUseMedia =
+    !!connectedDevice && !isConnecting && gasPpm !== null;
 
   // Barra unificada: 0–50% = preheat, 50–100% = calibración (siempre "Calibrando")
   const warmupProgressPercent =
@@ -256,9 +261,30 @@ export default function MainPage() {
     }
   };
 
+  // Función para desconectar manualmente el dispositivo
+  const handleDisconnect = () => {
+    if (!connectedDevice) {
+      setShowConnectModal(true);
+      startDiscoveryScan();
+    } else {
+      Alert.alert(
+        "Desconectar",
+        "¿Desconectar el dispositivo?",
+        [
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: "Desconectar",
+            style: "destructive",
+            onPress: () => disconnect(),
+          },
+        ]
+      );
+    }
+  }
+
   // Función para abrir cámara en modo video (desde botón Video en barra principal)
   const handleVideoPress = async () => {
-    if (!connectedDevice || !deviceReady) return;
+    if (!canUseMedia) return;
 
     if (!cameraPermission) return;
 
@@ -276,8 +302,8 @@ export default function MainPage() {
 
   // Función para manejar el botón de cámara (toggle)
   const handleCameraPress = async () => {
-    // Solo funciona si el equipo está conectado y calibrado
-    if (!connectedDevice || !deviceReady) {
+    // Solo funciona si el equipo está conectado y recibiendo datos del sensor
+    if (!canUseMedia) {
       return;
     }
 
@@ -307,6 +333,17 @@ export default function MainPage() {
     // Si tiene permisos, activar la cámara
     setShowCamera(true);
   };
+
+  const handleOpenGallery = async () => {
+    await loadRecords();
+    await loadVideoRecords();
+    setShowGalleryModal(true);
+  }
+
+  const handleToggleAlarm = () => {
+    setAlarmEnabled(!alarmEnabled);
+    console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
+  }
 
   // Función para tomar foto
   const handleTakePicture = async () => {
@@ -450,76 +487,37 @@ export default function MainPage() {
     >
       {/* Vista invisible para capturar foto con overlay de texto */}
       {tempPhotoUri && (
-        <View
-          ref={photoWithOverlayRef}
-          collapsable={false}
-          style={styles.photoOverlayContainer}
-        >
-          <Image
-            source={{ uri: tempPhotoUri }}
-            style={styles.photoOverlayImage}
-            resizeMode="cover"
-            onLoad={() => {
-              console.log("Imagen cargada, capturando vista...");
-              setImageLoaded(true);
-              // Esperar un momento después de que la imagen se cargue antes de capturar
-              setTimeout(() => {
-                if (tempPhotoUri) {
-                  capturePhotoWithOverlay(tempPhotoUri);
-                }
-              }, 300);
-            }}
-            onError={(error) => {
-              console.error("Error cargando imagen:", error);
-              setIsProcessingPhoto(false);
-              // Re-habilitar manejo de desconexiones después del error
-              if (ignoreDisconnectionRef?.set) {
-                ignoreDisconnectionRef.set(false);
-              }
+        <PhotoWithOverlayView
+          uri={tempPhotoUri}
+          viewRef={photoWithOverlayRef}
+          photoSensorValue={photoSensorValue}
+          onLoad={() => {
+            console.log("Imagen cargada, capturando vista...");
+            setImageLoaded(true);
+            setTimeout(() => {
               if (tempPhotoUri) {
-                handlePhotoTaken(tempPhotoUri);
-                setTempPhotoUri(null);
+                capturePhotoWithOverlay(tempPhotoUri);
               }
-            }}
-          />
-
-          {/* "Hydrogen Meter" arriba a la izquierda */}
-          <View style={styles.overlayTopLeft}>
-            <Text style={styles.overlayTextTop}>Hydrogen Meter</Text>
-          </View>
-
-          {/* Número del sensor abajo centrado usa la medición almacenada al tomar la foto */}
-          <View style={styles.overlayBottomCenter}>
-            <Text
-              style={styles.overlayTextCenter}
-              adjustsFontSizeToFit
-              numberOfLines={1}
-            >
-              {photoSensorValue !== null ? photoSensorValue : "--"}
-            </Text>
-          </View>
-
-          {/* Fecha abajo a la derecha */}
-          <View style={styles.overlayBottomRight}>
-            <Text style={styles.overlayTextBottom}>
-              {new Date().toLocaleDateString("es-ES", {
-                day: "2-digit",
-                month: "2-digit",
-                year: "numeric",
-              })}
-            </Text>
-          </View>
-        </View>
+            }, 300);
+          }}
+          onError={() => {
+            console.error("Error cargando imagen");
+            setIsProcessingPhoto(false);
+            if (ignoreDisconnectionRef?.set) {
+              ignoreDisconnectionRef.set(false);
+            }
+            if (tempPhotoUri) {
+              handlePhotoTaken(tempPhotoUri);
+              setTempPhotoUri(null);
+            }
+          }}
+        />
       )}
 
-      {/* Cámara de fondo cuando tiene permisos - siempre montada para evitar fondo negro al alternar modos */}
+      {/* Cámara de fondo cuando tiene permisos - Se usa tambien para grabar video */}
       {showCamera && cameraPermission?.granted && (
         <CameraView
           visible={showCamera}
-          onClose={() => {
-            setShowCamera(false);
-            setCameraMode("photo");
-          }}
           cameraRef={cameraRef}
           enableTorch={flashEnabled}
         />
@@ -586,81 +584,28 @@ export default function MainPage() {
         <PrincipalesBar
           connectedDevice={!!connectedDevice}
           alarmEnabled={alarmEnabled}
-          onWifiPress={() => {
-            if (!connectedDevice) {
-              setShowConnectModal(true);
-              startDiscoveryScan();
-            } else {
-              Alert.alert(
-                "Desconectar",
-                "¿Desconectar el dispositivo?",
-                [
-                  { text: "Cancelar", style: "cancel" },
-                  {
-                    text: "Desconectar",
-                    style: "destructive",
-                    onPress: () => disconnect(),
-                  },
-                ]
-              );
-            }
-          }}
+          onDisconnect={handleDisconnect}
           onCameraPress={handleCameraPress}
           onVideoPress={handleVideoPress}
-          onFilesPress={async () => {
-            await loadRecords();
-            await loadVideoRecords();
-            setShowGalleryModal(true);
-          }}
-          onAudioPress={() => {
-            setAlarmEnabled(!alarmEnabled);
-            console.log("Alarma", alarmEnabled ? "desactivada" : "activada");
-          }}
+          onFilesPress={handleOpenGallery}
+          onAudioPress={handleToggleAlarm}
           onConfigPress={() => setShowLogModal(true)}
-          disabled={!connectedDevice || !deviceReady}
+          disabled={!canUseMedia}
           showConfig={__DEV__}
         />
       )}
 
       {/* Contenido central que cambia según el estado */}
-      {/* Si la cámara está activa en modo foto, mostrar número y barra como overlay */}
+      {/* Vista de cámara foto: overlay con PPM y barra (como VideoRecordingCameraView para video) */}
       {showCamera && cameraPermission?.granted && cameraMode === "photo" ? (
-        <View style={styles.ppmOverlay}>
-          {/* Barra de rango 0-10,000 */}
-          <View style={styles.rangeBarContainerCamera}>
-            <View style={styles.rangeBar}>
-              <View
-                style={[
-                  styles.rangeBarFill,
-                  {
-                    width: `${Math.min(
-                      ((gasPpm !== null ? gasPpm : 0) / 10000) * 100,
-                      100,
-                    )}%`,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-          {/* Número */}
-          <View style={styles.ppmTopContainer}>
-            <View style={styles.ppmContainer}>
-              <Text style={styles.ppmValue}>
-                {gasPpm !== null ? gasPpm : "--"}
-              </Text>
-              {gasPpm !== null && ppmDirection === "up" && (
-                <View style={styles.ppmArrow}>
-                  <ArrowUpIcon size={40} color={AppRed} />
-                </View>
-              )}
-              {gasPpm !== null && ppmDirection === "down" && (
-                <View style={styles.ppmArrow}>
-                  <ArrowDownIcon size={40} color={AppRed} />
-                </View>
-              )}
-            </View>
-          </View>
-        </View>
+        <PhotoCameraView
+          visible={true}
+          cameraRef={cameraRef}
+          gasPpm={gasPpm}
+          ppmDirection={ppmDirection}
+          enableTorch={flashEnabled}
+          cameraProvidedExternally={true}
+        />
       ) : showCamera && cameraMode === "video" ? (
         /* Modo video: no mostrar barra/ppm de MainPage (VideoSection tiene el suyo) */
         null
@@ -668,12 +613,9 @@ export default function MainPage() {
         // Estado: No conectado - mostrar loading al conectar o botón conectar
         <>
           {isLoading ? (
-            // Conectando: loading y mensaje (oculta botón Conectar)
+            // Conectando: solo indicador de carga (sin texto)
             <View style={styles.centerContent}>
               <ActivityIndicator size="large" color={AppRed} />
-              <Text style={styles.loadingText}>
-                {connectionStatusMessage || "Conectando"}
-              </Text>
             </View>
           ) : autoConnectFailed ? (
             // No encontrado - mostrar botón conectar
@@ -693,36 +635,11 @@ export default function MainPage() {
       ) : connectedDevice && (gasPpm !== null || gasPpm === 0) ? (
         // Conectado y ya hay dato de PPM (incl. 0): mostrar PPM y barra
         <View style={styles.centerContent}>
-          <View style={styles.rangeBarContainer}>
-            <View style={styles.rangeBar}>
-              <View
-                style={[
-                  styles.rangeBarFill,
-                  {
-                    width: `${Math.min(
-                      ((gasPpm !== null ? gasPpm : 0) / 10000) * 100,
-                      100,
-                    )}%`,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-          <View style={styles.ppmContainer}>
-            <Text style={styles.ppmValue}>
-              {gasPpm !== null ? gasPpm : "--"}
-            </Text>
-            {gasPpm !== null && ppmDirection === "up" && (
-              <View style={styles.ppmArrow}>
-                <ArrowUpIcon size={40} color={AppRed} />
-              </View>
-            )}
-            {gasPpm !== null && ppmDirection === "down" && (
-              <View style={styles.ppmArrow}>
-                <ArrowDownIcon size={40} color={AppRed} />
-              </View>
-            )}
-          </View>
+          <PpmRangeDisplay
+            gasPpm={gasPpm}
+            ppmDirection={ppmDirection}
+            variant="main"
+          />
         </View>
       ) : (
         // Conectado pero sin dato PPM aún: precalentamiento/calibración
@@ -753,6 +670,7 @@ export default function MainPage() {
         </View>
       )}
 
+      {/* Modal para solicitar permisos de cámara */}
       <CameraPermissionModal
         visible={showCamera && !cameraPermission?.granted}
         onClose={() => setShowCamera(false)}
@@ -760,6 +678,7 @@ export default function MainPage() {
         onPermissionGranted={() => setShowCamera(true)}
       />
 
+      {/* Modal para ver los logs del dispositivo y estados de conexión */}
       {__DEV__ && (
         <ConsoleLogModal
           visible={showLogModal}
@@ -769,6 +688,7 @@ export default function MainPage() {
         />
       )}
 
+      {/* Modal de dispositivos a conectar */}
       <DeviceConnectModal
         visible={showConnectModal}
         onClose={() => {
@@ -785,6 +705,7 @@ export default function MainPage() {
         mockEnabled={MOCK_BLE_ENABLED}
       />
 
+      {/* Formulario para registrar una foto */}
       <PhotoFormModal
         visible={showPhotoFormModal}
         onClose={() => {
@@ -805,6 +726,7 @@ export default function MainPage() {
         }}
       />
 
+      {/* Modal para ver todos los registros de la aplicación */}
       <GalleryModal
         visible={showGalleryModal}
         onClose={() => setShowGalleryModal(false)}
@@ -829,6 +751,7 @@ export default function MainPage() {
         }}
       />
 
+      {/* Modal para ver el registro de una foto */}
       <FullImageModal
         visible={showFullImageModal}
         onClose={() => {
@@ -846,6 +769,7 @@ export default function MainPage() {
         onRecordUpdated={setFullImageRecord}
       />
 
+      {/* Modal para ver el registro de un video */}
       <FullVideoModal
         visible={showFullVideoModal}
         onClose={() => {
@@ -858,6 +782,7 @@ export default function MainPage() {
         onRecordUpdated={setFullVideoRecord}
       />
 
+      {/* Modal para ver la imagen en pantalla completa */}
       <ImageViewerModal
         visible={showFullImageViewer}
         imageUri={viewerImageUri}
@@ -867,6 +792,7 @@ export default function MainPage() {
         }}
       />
 
+      {/* Modal para ver el video en pantalla completa */}
       <VideoViewerModal
         visible={showVideoViewerModal}
         record={fullVideoRecord}
@@ -935,7 +861,7 @@ const styles = StyleSheet.create({
   },
   batteryContainer: {
     position: "absolute",
-    top: 50,
+    top: 20,
     right: 20,
     alignItems: "center",
     justifyContent: "center",
@@ -1649,62 +1575,5 @@ const styles = StyleSheet.create({
   warmupSubtext: {
     fontSize: 14,
     color: "#888",
-  },
-  photoOverlayContainer: {
-    position: "absolute",
-    top: -9999,
-    left: -9999,
-    width: Dimensions.get("window").width,
-    height: Dimensions.get("window").height,
-    backgroundColor: "#000",
-    opacity: 1,
-  },
-  photoOverlayImage: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: "transparent",
-  },
-  overlayTopLeft: {
-    position: "absolute",
-    top: 20,
-    left: 20,
-  },
-  overlayTextTop: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: AppRed,
-    textShadowColor: "rgba(0, 0, 0, 0.75)",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
-  },
-  overlayBottomCenter: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingBottom: Dimensions.get("window").height * 0.15, // Un poco más arriba (15% desde abajo)
-  },
-  overlayTextCenter: {
-    fontSize: 72,
-    fontWeight: "bold",
-    color: AppRed,
-    textShadowColor: "rgba(0, 0, 0, 0.75)",
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 4,
-  },
-  overlayBottomRight: {
-    position: "absolute",
-    bottom: 20,
-    right: 20,
-  },
-  overlayTextBottom: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: AppRed,
-    textShadowColor: "rgba(0, 0, 0, 0.75)",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
   },
 });

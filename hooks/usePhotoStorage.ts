@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
-import { Platform } from 'react-native';
 
 export interface PhotoRecord {
   id: string;
