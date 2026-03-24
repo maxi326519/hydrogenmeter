@@ -53,6 +53,13 @@
     },
     "plugins": [
       [
+        "@config-plugins/ffmpeg-kit-react-native",
+        {
+          "package": "full-gpl"
+        }
+      ],
+      "./plugins/withAppodealFFmpegMaven",
+      [
         "expo-router"
       ],
       [
@@ -78,7 +85,8 @@
           "savePhotosPermission": "Permitir guardar fotos y videos en tu galería para que puedas acceder a ellos desde la app Fotos"
         }
       ],
-      "./plugins/withAndroidLint"
+      "./plugins/withAndroidLint",
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true

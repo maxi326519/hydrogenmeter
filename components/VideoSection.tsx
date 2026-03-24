@@ -17,6 +17,18 @@ import {
 } from "react-native";
 import TextInput from "./Inputs/TextInput";
 import RecordScreen from "react-native-record-screen";
+import * as FileSystem from "expo-file-system";
+import {
+  useVideoOverlay,
+  type VideoOverlayTimelineItem,
+} from "../hooks/useVideoOverlay";
+
+/** Datos de prueba para drawtext dinámico tras grabar (FFmpeg). */
+const VIDEO_OVERLAY_TEST_DATA: VideoOverlayTimelineItem[] = [
+  { time: 0, value: "PPM demo 0s" },
+  { time: 2, value: "PPM demo 2s" },
+  { time: 4, value: "PPM demo 4s" },
+];
 
 export interface VideoSectionProps {
   visible: boolean;
@@ -63,6 +75,7 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
   const [showVideoFormModal, setShowVideoFormModal] = useState(false);
   const [recordingStartDate, setRecordingStartDate] = useState<Date | null>(null);
   const maxPpmDuringRecordingRef = useRef<number | null>(null);
+  const { addOverlay } = useVideoOverlay();
 
   // Registrar el máximo PPM durante la grabación (para video se guarda el más alto)
   useEffect(() => {
@@ -160,7 +173,39 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
         if (!videoUri.startsWith("file://") && !videoUri.startsWith("content://")) {
           videoUri = `file://${videoUri}`;
         }
-        handleVideoRecordingComplete(videoUri);
+
+        if (videoUri.startsWith("file://")) {
+          const inputFs = videoUri.replace(/^file:\/\//, "");
+          /** Caché de la app: escribible sin crear subcarpetas (evita error en `files/videos/` en algunos Android). */
+          const cacheRoot = FileSystem.cacheDirectory ?? "";
+          let outputFs: string;
+          if (cacheRoot) {
+            const outBase = cacheRoot.startsWith("file://")
+              ? cacheRoot.replace(/^file:\/\//, "")
+              : cacheRoot;
+            const sep = outBase.endsWith("/") ? "" : "/";
+            outputFs = `${outBase}${sep}ffmpeg_overlay_${Date.now()}.mp4`;
+          } else {
+            const parent = inputFs.slice(0, inputFs.lastIndexOf("/") + 1);
+            outputFs = `${parent}ffmpeg_overlay_${Date.now()}.mp4`;
+          }
+          try {
+            await addOverlay({
+              inputPath: inputFs,
+              outputPath: outputFs,
+              data: VIDEO_OVERLAY_TEST_DATA,
+            });
+            handleVideoRecordingComplete(`file://${outputFs}`);
+          } catch (overlayErr) {
+            console.warn(
+              "[VideoSection] Overlay FFmpeg no aplicado, se usa el video original:",
+              overlayErr,
+            );
+            handleVideoRecordingComplete(videoUri);
+          }
+        } else {
+          handleVideoRecordingComplete(videoUri);
+        }
       } else {
         console.warn("[VideoSection] Sin outputURL válido. result:", JSON.stringify(result));
         Alert.alert(
@@ -179,7 +224,7 @@ export const VideoSection: React.FC<VideoSectionProps> = ({
     } finally {
       setIsProcessingVideo(false);
     }
-  }, [isVideoRecording, handleVideoRecordingComplete]);
+  }, [isVideoRecording, handleVideoRecordingComplete, addOverlay]);
 
   const handleSaveVideo = async () => {
     if (!capturedVideoUri) {
