@@ -230,6 +230,7 @@ export const useBLE = () => {
 
     parseSensorData(dataInput);
     addConsoleMessage(dataInput);
+    useBLEStore.getState().bumpSignalTick();
   };
 
   // Iniciar streaming de datos

@@ -7,3 +7,4 @@ export { GalleryModal } from "./GalleryModal";
 export { ImageViewerModal } from "./ImageViewerModal";
 export { PhotoFormModal } from "./PhotoFormModal";
 export { VideoViewerModal } from "./VideoViewerModal";
+export { SavingVideosModal } from "./SavingVideosModal";

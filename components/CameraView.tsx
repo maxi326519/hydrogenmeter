@@ -1,5 +1,5 @@
 import { CameraView as ExpoCameraView } from 'expo-camera';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 import React from 'react';
 
 interface CameraViewProps {
@@ -24,6 +24,24 @@ export const CameraView: React.FC<CameraViewProps> = ({
     return null;
   }
 
+  /**
+   * En modo video, en Android NO hard-codeamos videoQuality/ratio: CameraX
+   * elige la mejor combinación que soporta el device. Hard-codear 1080p/16:9
+   * en portrait en encoders débiles (ej. Moto G15 / Helio G81 en debug)
+   * dispara CameraX ERROR_UNKNOWN al finalizar el recordAsync.
+   * En iOS sí los fijamos porque el pipeline aguanta y queda consistente.
+   */
+  const videoProps =
+    mode === "video"
+      ? Platform.OS === "ios"
+        ? {
+            videoQuality: "1080p" as const,
+            ratio: "16:9" as const,
+            videoStabilizationMode: "standard" as const,
+          }
+        : {}
+      : {};
+
   return (
     <View style={styles.container}>
       <ExpoCameraView
@@ -34,15 +52,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
         mute={mute}
         enableTorch={enableTorch}
         animateShutter={false}
-        {...(mode === "video"
-          ? {
-              /** 1080p 16:9 cuando el dispositivo lo permite; si no, expo elige la máxima disponible. */
-              videoQuality: "1080p" as const,
-              ratio: "16:9" as const,
-              /** iOS: menos trepidación en la grabación. */
-              videoStabilizationMode: "standard" as const,
-            }
-          : {})}
+        {...videoProps}
       />
     </View>
   );

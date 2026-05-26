@@ -22,6 +22,8 @@ interface BLEState {
   discoveredDevices: Device[];
   /** Mensaje de estado durante conexión: "cargando..." o "conectando" */
   connectionStatusMessage: string;
+  /** Contador que se incrementa cada vez que se recibe un paquete del dispositivo (real o mock). */
+  signalTick: number;
 
   // Estados internos (para refs)
   isConnecting: boolean;
@@ -53,6 +55,7 @@ interface BLEState {
   addDiscoveredDevice: (device: Device) => void;
   clearDiscoveredDevices: () => void;
   setConnectionStatusMessage: (message: string) => void;
+  bumpSignalTick: () => void;
 }
 
 export const useBLEStore = create<BLEState>((set) => ({
@@ -75,6 +78,7 @@ export const useBLEStore = create<BLEState>((set) => ({
   isScanning: false,
   savedDeviceId: null,
   ignoreDisconnection: false,
+  signalTick: 0,
 
   // Actions
   setConnectedDevice: (device) => set({ connectedDevice: device }),
@@ -119,4 +123,5 @@ export const useBLEStore = create<BLEState>((set) => ({
   clearDiscoveredDevices: () => set({ discoveredDevices: [] }),
   setConnectionStatusMessage: (message) =>
     set({ connectionStatusMessage: message }),
+  bumpSignalTick: () => set((state) => ({ signalTick: state.signalTick + 1 })),
 }));

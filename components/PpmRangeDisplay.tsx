@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, ViewStyle } from "react-native";
 import { ArrowUpIcon, ArrowDownIcon } from "./Icons";
+import { SignalIndicator } from "./SignalIndicator";
 import { AppRed } from "../constants/Colors";
 
 export interface PpmRangeDisplayProps {
@@ -46,6 +47,7 @@ export const PpmRangeDisplay: React.FC<PpmRangeDisplayProps> = ({
       </View>
       <View style={[ppmWrapStyle, ppmContainerStyle]}>
         <View style={styles.ppmContainer}>
+          <SignalIndicator size={20} style={styles.signalIndicator} />
           <Text style={styles.ppmValue}>
             {gasPpm !== null ? gasPpm : "--"}
           </Text>
@@ -123,5 +125,8 @@ const styles = StyleSheet.create({
   },
   ppmArrow: {
     marginLeft: 12,
+  },
+  signalIndicator: {
+    marginRight: 16,
   },
 });

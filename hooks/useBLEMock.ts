@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { ConsoleEntry } from "./useBLE";
 import type { Device } from "react-native-ble-plx";
+import { useBLEStore } from "../stores/useBLEStore";
 
 /** Dispositivo simulado para el mock */
 const MOCK_DEVICE = {
@@ -148,6 +149,7 @@ export function useBLEMock() {
     let batV = 3.5;
 
     simIntervalRef.current = setInterval(() => {
+      useBLEStore.getState().bumpSignalTick();
       if (preheat < 100) {
         preheat += 50;
         setPreheatProgress(preheat);

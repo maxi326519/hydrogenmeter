@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Text,
   Dimensions,
+  Platform,
 } from "react-native";
 import React from "react";
 
@@ -63,7 +64,9 @@ export const VideoRecordingCameraView: React.FC<VideoRecordingCameraViewProps> =
           mute={false}
           videoQuality="1080p"
           ratio="16:9"
-          videoStabilizationMode="standard"
+          {...(Platform.OS === "ios"
+            ? { videoStabilizationMode: "standard" as const }
+            : {})}
           enableTorch={enableTorch}
           animateShutter={false}
         />

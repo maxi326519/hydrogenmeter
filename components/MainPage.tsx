@@ -3,6 +3,7 @@ import { usePhotoStorage, PhotoRecord } from "../hooks/usePhotoStorage";
 import { useVideoStorage, VideoRecord } from "../hooks/useVideoStorage";
 import { MOCK_BLE_ENABLED } from "@/constants/mockBLE";
 import { PpmRangeDisplay } from "./PpmRangeDisplay";
+import { VideoSavingIndicator } from "./VideoSavingIndicator";
 import { PhotoCameraView } from "./PhotoCameraView";
 import { PhotoWithOverlayView } from "./PhotoWithOverlayView";
 import { useBLEOrMock } from "../hooks/useBLEOrMock";
@@ -29,7 +30,6 @@ import {
 } from "./modals";
 import {
   useCameraPermissions,
-  useMicrophonePermissions,
   CameraView as ExpoCameraView,
 } from "expo-camera";
 import {
@@ -88,13 +88,13 @@ export default function MainPage() {
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [cameraMode, setCameraMode] = useState<"photo" | "video">("photo");
+  const videoProcessingCancelRef = useRef<(() => void) | null>(null);
   const [alarmEnabled, setAlarmEnabled] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [ppmDirection, setPpmDirection] = useState<"up" | "down" | null>(null);
   const previousPpmRef = useRef<number | null>(null);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [, requestMicrophonePermission] = useMicrophonePermissions();
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [showPhotoFormModal, setShowPhotoFormModal] = useState(false);
   const [showFullImageModal, setShowFullImageModal] = useState(false);
@@ -298,14 +298,7 @@ export default function MainPage() {
       }
     }
 
-    const mic = await requestMicrophonePermission();
-    if (!mic.granted) {
-      Alert.alert(
-        "Micrófono",
-        "Sin permiso de micrófono el vídeo se grabará sin audio. Puedes activarlo en Ajustes del sistema.",
-      );
-    }
-
+    // El permiso de micrófono se verifica al tocar grabar (no en la apertura).
     setCameraMode("video");
     setShowCamera(true);
   };
@@ -531,7 +524,6 @@ export default function MainPage() {
           cameraRef={cameraRef}
           enableTorch={flashEnabled}
           mode={cameraMode === "video" ? "video" : "picture"}
-          mute={false}
         />
       )}
 
@@ -554,15 +546,19 @@ export default function MainPage() {
         }}
         flashEnabled={flashEnabled}
         onFlashPress={() => setFlashEnabled(!flashEnabled)}
+        videoProcessingCancelRef={videoProcessingCancelRef}
       />
 
-      {/* Batería arriba a la derecha - nivel real cuando hay dato (equipo enviando) */}
-      <View style={styles.batteryContainer}>
-        {bateria !== null ? (
-          getBatteryIcon()
-        ) : (
-          <Battery10Icon size={48} color={AppRed} />
-        )}
+      {/* Header superior derecho: indicador de guardado de video + batería */}
+      <View style={styles.topRightHeader}>
+        <VideoSavingIndicator iconSize={32} />
+        <View style={styles.batteryWrapper}>
+          {bateria !== null ? (
+            getBatteryIcon()
+          ) : (
+            <Battery10Icon size={48} color={AppRed} />
+          )}
+        </View>
       </View>
 
       {/* Botones: modo cámara (CameraBar) o modo normal (PrincipalesBar) */}
@@ -581,16 +577,7 @@ export default function MainPage() {
             }}
             flashEnabled={flashEnabled}
             onFlashPress={() => setFlashEnabled(!flashEnabled)}
-            onSwitchToVideoMode={async () => {
-              const mic = await requestMicrophonePermission();
-              if (!mic.granted) {
-                Alert.alert(
-                  "Micrófono",
-                  "Sin permiso de micrófono el vídeo se grabará sin audio. Puedes activarlo en Ajustes del sistema.",
-                );
-              }
-              setCameraMode("video");
-            }}
+            onSwitchToVideoMode={() => setCameraMode("video")}
             isProcessing={isProcessingPhoto}
             captureButton={
               <CameraCaptureButton
@@ -880,14 +867,19 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "bold",
   },
-  batteryContainer: {
+  topRightHeader: {
     position: "absolute",
     top: 20,
     right: 20,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 12,
     zIndex: 20,
     elevation: 20,
+  },
+  batteryWrapper: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   ppmBottomContainer: {
     position: "absolute",
